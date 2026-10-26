@@ -46,6 +46,22 @@ class DeploymentProfileTests(unittest.TestCase):
             ("3-A14R", 9), ("3-A15R", 10), ("3-B13R", 11), ("3-B14R", 12),
             ("4-A11R", 13), ("4-A12R", 14), ("4-A14R", 15)])
 
+    def test_f5_full_names_reject_same_short_names_in_other_buildings(self):
+        profile = profiles.get_profile("F5")
+        pattern = profile["full_name_pattern"]
+        # Both real F5 areas use F5 in the full name, including the 1F rooms.
+        for area, config in profile["room_catalog"].items():
+            for short in config["rooms"]:
+                with self.subTest(area=area, short=short):
+                    confirmed = "CN-ShenZhen-F5-" + short
+                    self.assertIsNotNone(re.fullmatch(pattern, confirmed, re.IGNORECASE))
+                    self.assertIsNotNone(re.fullmatch(
+                        pattern, confirmed.replace("-", "_").lower(), re.IGNORECASE))
+                    for building in ("F6", "F50"):
+                        other = f"CN-ShenZhen-{building}-{short}"
+                        # DOM extraction uses search; it must not admit the other building.
+                        self.assertIsNone(re.search(pattern, other, re.IGNORECASE))
+
     def test_profile_copy_cannot_change_original_or_later_lookup(self):
         before = deepcopy(profiles.PROFILES)
         first = profiles.get_profile("H7")

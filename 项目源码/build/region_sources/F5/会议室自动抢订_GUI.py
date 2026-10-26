@@ -1479,15 +1479,12 @@ def run_window_drag_self_test(app):
 
 
 def run_self_test(marker: Path):
-    # 仅验证配套签名及加密依赖是否进入程序，不授予当前Windows用户使用权。
-    # 正常入口、开始按钮和核心入口仍各自执行OS账号门禁。
+    """构建时验证内嵌依赖、GUI与核心参数；授权文件由管理员另外分发。"""
+    # 构建自检不读取外置授权文件。正常入口、开始按钮和核心入口仍核验账号。
+    from base64 import b64decode
     import account_auth
-    raw = (account_auth.application_directory() / account_auth.LICENSE_FILENAME).read_bytes()
-    assert 0 < len(raw) <= account_auth.MAX_LICENSE_BYTES, "配套授权文件大小异常"
-    document = json.loads(raw.decode("utf-8"))
-    first_account = document["payload"]["accounts"][0]
-    assert account_auth.verify_document(document, first_account) == first_account, "配套授权验签失败"
-    """Windows 打包后做真实GUI与核心参数一致性自检，不进入公司网络。"""
+    from account_public_key import PUBLIC_KEY_BASE64
+    account_auth.Ed25519PublicKey.from_public_bytes(b64decode(PUBLIC_KEY_BASE64, validate=True))
     test_config = copy.deepcopy(DEFAULT_CONFIG)
     test_config["rooms"] = {area: [next(iter(room_map))]
                             for area, room_map in core.AREA_ROOM_ROWS.items()}

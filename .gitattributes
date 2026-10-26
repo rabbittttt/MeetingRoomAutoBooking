@@ -1,2 +1,2 @@
 # 构建校验使用源码SHA256，保留现有文件字节和换行格式。
-* -text
+* -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

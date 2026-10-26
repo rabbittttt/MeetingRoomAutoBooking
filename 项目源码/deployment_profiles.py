@@ -5,6 +5,7 @@
 每个区域的名单须完整覆盖 full_name_pattern 匹配到的房间，并按网页顺序编号。
 只配置部分会议室时，完整房名规则必须严格限定这些房间；行号使用匹配后的
 相对顺序（从1开始），不能填写它们在全部房间中的原始行号。
+运行时按真实房名定位；账号只能看到部分房间时，不修改管理员名单及配置编号。
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ PROFILES = {
         "label": "F5 / F5-1A",
         "city": "深圳(Shenzhen)",
         "zone": "F",
-        "full_name_pattern": r"CN[-_]ShenZhen[-_][A-Za-z0-9_-]+",
+        "full_name_pattern": r"CN[-_]ShenZhen[-_]F5[-_][A-Za-z0-9_-]+",
         "short_name_pattern": r"(?:^|[-_])(\d+F?[-_][A-Z]\d+R)$",
         "release_open_at": "08:30:00",
         "expected_counts": {"F5": 3, "F5-1A": 13},

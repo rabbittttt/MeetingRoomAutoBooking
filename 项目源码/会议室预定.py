@@ -497,6 +497,7 @@ def booking_result(mode: str, target: Target, room: RoomSpec | None,
         "expired": "超出截止时间",
         "uncertain": "提交结果待确认，已暂停此时段；请先在我的预订中核实",
         "occupied": "目标时段已被占用/当前不可选",
+        "not_visible": "当前查询名单未显示此会议室",
         "stopped": "本次尝试已停止", "blocked": "控件无法安全核验，本房间本时段已停止",
         "prepare_failed": "表单准备失败", "skipped": "检测到其他房间已成功，停止本页提交",
         "failed": "未订到", "no_rooms": "当天没有可参与的会议室",
@@ -516,7 +517,7 @@ class ConciseLogFilter(logging.Filter):
     """界面保留进度和真正异常；磁盘日志不使用此过滤器。"""
     INFO_PREFIXES = (
         "日志：", "[启动]", "[账号验证]", "[登录] 单页认证成功",
-        "[到点抢订]", "[候补] 开始监控", "[候补] 时段完成",
+        "[到点抢订]", "[房间未显示]", "[候补] 开始监控", "[候补] 时段完成",
         "[候补] 已达到", "[候补] 所有时段", "[候补] 已停止", "[退出]",
     )
 
@@ -911,17 +912,38 @@ def room_short_name(name: str) -> str:
     return m.group(1).replace("_", "-") if m else name.strip().upper()
 
 
-def rooms_match_area(rooms: list[dict], area: str) -> bool:
-    """用源码完整名单核验区域，不把旧楼层的固定数量作为判断依据。"""
+def rooms_match_area(rooms: list[dict], area: str, *, allow_partial: bool = False) -> bool:
+    """默认核验完整名单；查询后允许无重复、无未知房名的有序可见子名单。"""
     expected = AREA_EXPECTED_SHORT_NAMES.get(area)
-    if not expected or len(rooms) != len(expected):
+    if not expected or not rooms:
+        return False
+    if any(re.fullmatch(ROOM_FULL_NAME_PATTERN, str(item.get('name', '')), re.IGNORECASE) is None
+           for item in rooms):
         return False
     observed = [room_short_name(str(r.get('name', ''))) for r in rooms]
-    return len(set(observed)) == len(expected) and set(observed) == set(expected)
+    if len(set(observed)) != len(observed) or not set(observed).issubset(expected):
+        return False
+    if not allow_partial:
+        return len(observed) == len(expected)
+    # 缺少其他房间可以接受；未知房间、重复房名或名单乱序仍不接受。
+    positions = [expected.index(name) for name in observed]
+    return positions == sorted(positions)
+
+
+def room_area_for_selection(room_name: str, room_row: int) -> str:
+    """配置行号仅核验管理员配置身份，不能拿来索引账号当前可见的行。"""
+    areas = [area for area, rows in AREA_ROOM_ROWS.items()
+             if rows.get(room_name) == room_row]
+    if len(areas) != 1:
+        raise SelectorConfigurationError(
+            f'{room_name}的配置行号{room_row}无法对应唯一预置区域，拒绝选房')
+    return areas[0]
 
 
 async def verify_room_identity(page: Page, room: RoomSpec) -> None:
-    """避免筛选后列表顺序变化、仍按原固定行号点击到其他房间。"""
+    """核验可见名单后按唯一房名定位，兼容不同账号缺少部分预置会议室。"""
+    if AREA_ROOM_ROWS.get(room.area, {}).get(room.name) != room.row:
+        raise SelectorConfigurationError(f'{room.area}:{room.name}的配置行号无效')
     visible_rooms = await read_visible_room_names(page)
     if not visible_rooms:
         if not DRY_RUN:
@@ -929,18 +951,18 @@ async def verify_room_identity(page: Page, room: RoomSpec) -> None:
                 f'{room.area}:{room.name} 无法读取会议室名称，正式模式拒绝按第{room.row}行盲订')
         logging.warning('[房间核验] 暂未识别可见房间名称；模拟模式仅测试控件，不代表房间名称已核对')
         return
-    if room.row > len(visible_rooms):
+    if not rooms_match_area(visible_rooms, room.area, allow_partial=True):
         raise SelectorConfigurationError(
-            f'选择第{room.row}行，但可见会议室只有{len(visible_rooms)}间；停止错误点击')
-    actual = visible_rooms[room.row-1]['name']
-    # 无论使用名称还是行号，都先确认整个列表属于正确区域。
-    correct = rooms_match_area(visible_rooms, room.area)
-    correct = correct and room_short_name(actual) == room.name.upper()
-    if not correct:
-        logging.error('[房间核验] %s期望=%s第%d行，但实际第%d行=%s，阻止误订；请先运行list-rooms核实',
-                      room.area,room.name,room.row,room.row,actual)
-        raise SelectorConfigurationError(f'实际第{room.row}行={actual}，与配置{room.name}不一致')
-    logging.info('[房间核验] %s第%d行匹配：%s', room.area,room.row,actual)
+            f'{room.area}当前会议室名单有未知、重复或乱序房名，拒绝选房')
+    matches = [(index + 1, item['name']) for index, item in enumerate(visible_rooms)
+               if room_short_name(item['name']) == room.name.upper()]
+    if not matches:
+        raise RoomNotVisibleError(f'{room.area}:{room.name}未出现在当前查询名单中')
+    if len(matches) != 1:
+        raise SelectorConfigurationError(f'{room.area}:{room.name}存在重复房名，拒绝选房')
+    actual_row, actual = matches[0]
+    logging.info('[房间核验] %s:%s｜配置行%d｜当前名单行%d｜按房名定位：%s',
+                 room.area, room.name, room.row, actual_row, actual)
 
 
 async def record_filter_ui_probe(page: Page, area: str, stage: str) -> None:
@@ -1387,11 +1409,21 @@ async def query_area_rooms(page: Page, area: str) -> None:
         raise SelectorConfigurationError(f'{area} 找不到唯一可见的「查询」按钮')
     await button.click(timeout=ACTION_TIMEOUT_MS)
     logging.info('[区域筛选] %s｜点击查询（仍在同一个选房弹窗）',area)
+    previous_names = None
+    stable_reads = 0
     for _ in range(12):
         await asyncio.sleep(AREA_RESULT_WAIT_SECONDS/12)
         names = await read_visible_room_names(page)
-        if rooms_match_area(names,area):
-            logging.info('[区域筛选] %s｜查询后核验房间%d间',area,len(names))
+        signature = tuple(room_short_name(item['name']) for item in names)
+        if signature == previous_names:
+            stable_reads += 1
+        else:
+            previous_names, stable_reads = signature, 1
+        if rooms_match_area(names, area, allow_partial=True) and (
+                len(names) == len(AREA_EXPECTED_SHORT_NAMES[area]) or stable_reads >= 2):
+            missing = [name for name in AREA_EXPECTED_SHORT_NAMES[area] if name not in signature]
+            logging.info('[区域筛选] %s｜查询后可见%d间，预置%d间｜名单未显示=%s；按实际房名定位',
+                         area, len(names), len(AREA_EXPECTED_SHORT_NAMES[area]), missing)
             return
     names = await read_visible_room_names(page)
     raise SelectorConfigurationError(
@@ -1409,6 +1441,15 @@ async def select_area(page: Page, area: str) -> str:
     await page.get_by_role('button',name=ADD_ROOM_BUTTON).click(timeout=ACTION_TIMEOUT_MS)
     panel = page.locator('.ev_Dialog_Panel:visible').first
     await panel.wait_for(state='visible',timeout=FILTER_RENDER_TIMEOUT_MS)
+
+    # 网页会保留各账号自己的默认标签。优先显示全部会议室，再核验楼栋和名单。
+    all_rooms_tab = panel.get_by_text('全部会议室', exact=True).filter(visible=True)
+    tab_count = await all_rooms_tab.count()
+    if tab_count > 1:
+        raise SelectorConfigurationError('选房弹窗内的「全部会议室」入口不唯一')
+    if tab_count == 1:
+        await all_rooms_tab.click(timeout=ACTION_TIMEOUT_MS)
+        logging.info('[区域筛选] 已切换到全部会议室，随后核验目标楼栋')
 
     # 弹窗里的默认会议室名单和楼栋下拉控件并不是同时渲染。
     # 尤其是默认先显示F5-1A时，不能因为“已经读到13间房”就提前结束等待，
@@ -1642,6 +1683,7 @@ async def save_grid_diagnostic(page: Page, room_name: str, row: int, start_col: 
 async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col: int,
                             end_col: int) -> list[ElementHandle] | None:
     """在唯一选房弹窗内按实际房名、行中心和同父格子核验；所有行使用同一规则。"""
+    area = room_area_for_selection(room_name, room_row)
     panels = page.locator(".ev_Dialog_Panel:visible")
     panel_count = await panels.count()
     if panel_count == 0:
@@ -1649,7 +1691,7 @@ async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col
     if panel_count != 1:
         raise SelectorConfigurationError("无法唯一确定当前选房弹窗，拒绝时间格子点击")
     result = await panels.evaluate_handle(r"""(panel, args) => {
-        const {startCol,endCol,roomName,roomRow,fullNamePattern,shortNamePattern}=args;
+        const {startCol,endCol,roomName,fullNamePattern,shortNamePattern,expectedNames}=args;
         const fullNameRx=new RegExp(fullNamePattern,'i');
         // 房名和格子在同一次DOM读取中取坐标，避免自动滚动/重绘发生在两次读取之间。
         const rooms=[],seen=new Set();
@@ -1665,12 +1707,20 @@ async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col
             seen.add(key); rooms.push({name,r});
         }
         rooms.sort((a,b)=>a.r.y-b.r.y||a.r.x-b.r.x);
-        if(rooms.length<roomRow) return {count:0};
-        const actual=rooms[roomRow-1];
-        const short=actual.name.toUpperCase().match(new RegExp(shortNamePattern));
-        if(!roomName.startsWith('F5-1A/第') &&
-           (short?short[1].replaceAll('_','-'):actual.name.toUpperCase())!==roomName.toUpperCase())
-            return {count:0,identityMismatch:actual.name};
+        if(!rooms.length) return {count:0};
+        const shortName = name => {
+            const match=name.toUpperCase().match(new RegExp(shortNamePattern));
+            return match?match[1].replaceAll('_','-'):name.toUpperCase();
+        };
+        const observed=rooms.map(item=>shortName(item.name));
+        const positions=observed.map(name=>expectedNames.indexOf(name));
+        if(new Set(observed).size!==observed.length || positions.some(
+            (position,index)=>position<0 || (index>0 && position<=positions[index-1])))
+            return {count:0,listMismatch:true};
+        const matched=rooms.filter(item=>shortName(item.name)===roomName.toUpperCase());
+        if(!matched.length) return {count:0,missingRoom:true};
+        if(matched.length!==1) return {count:0,listMismatch:true};
+        const actual=matched[0];
         const centerY=actual.r.y+actual.r.height/2;
         const gaps=rooms.map(x=>Math.abs(x.r.y+x.r.height/2-centerY)).filter(x=>x>1);
         const tolerance=Math.min(Math.max(3,actual.r.height*.6),gaps.length?Math.min(...gaps)*.4:Infinity);
@@ -1716,12 +1766,14 @@ async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col
     }""", {"startCol": start_col, "endCol": end_col,
             "roomName": room_name, "roomRow": room_row,
             "fullNamePattern": ROOM_FULL_NAME_PATTERN,
-            "shortNamePattern": ROOM_SHORT_NAME_PATTERN}, timeout=ACTION_TIMEOUT_MS)
+            "shortNamePattern": ROOM_SHORT_NAME_PATTERN,
+            "expectedNames": AREA_EXPECTED_SHORT_NAMES[area]}, timeout=ACTION_TIMEOUT_MS)
     kept: list[ElementHandle] = []
     try:
-        mismatch = await result.evaluate("value => value.identityMismatch || ''")
-        if mismatch:
-            raise SelectorConfigurationError(f"第{room_row}行实际房名{mismatch}与目标{room_name}不一致")
+        if await result.evaluate('value => !!value.listMismatch'):
+            raise SelectorConfigurationError('当前会议室名单有未知、重复或乱序房名，拒绝时间格点击')
+        if await result.evaluate('value => !!value.missingRoom'):
+            raise RoomNotVisibleError(f'{area}:{room_name}未出现在当前查询名单中')
         count = await result.evaluate("value => value.count")
         if count > 1:
             raise SelectorConfigurationError(f"第{room_row}行有{count}组不同的时间格子候选，拒绝按first猜选")
@@ -1772,7 +1824,7 @@ async def choose_room_cells(page: Page, room_name: str, room_row: int, target: T
                     # 不将剩余预算挤成1ms后立即误报。上层仍按抢订截止/停止取消准备。
                     await pair[endpoint].click(timeout=ACTION_TIMEOUT_MS,
                                                no_wait_after=True)
-                    logging.info("[格子核验] [%s] 第%d行%s已点击｜%s-%s｜列%d",
+                    logging.info("[格子核验] [%s] 配置行%d%s已按实际房名点击｜%s-%s｜列%d",
                                  room_name, room_row, "起点" if endpoint == 0 else "终点",
                                  target.start, target.end, column)
                     break
@@ -1809,6 +1861,10 @@ class AuthBlocked(RuntimeError):
 class SelectorConfigurationError(RuntimeError):
     """页面控件与已录制选择器不匹配；停止持续刷新并保存诊断。"""
     pass
+
+
+class RoomNotVisibleError(RuntimeError):
+    """当前查询名单没有此预置房间；不代表占用或结构异常，可在下轮重新检查。"""
 
 
 class YearSelectionUnsupported(SelectorConfigurationError):
@@ -2113,11 +2169,12 @@ async def confirm_room_selection(page: Page) -> bool:
 
 
 async def prepare_page(page: Page, room: RoomSpec, target: Target, *,
-                       watch_mode: bool = False) -> bool | None:
+                       watch_mode: bool = False) -> bool | None | Literal['not_visible']:
     """并发准备工作页。
 
     返回 True=已准备好最终预订页面；False=真实准备异常；
     None=完成选格后目标时段仍不可选：确认禁用，或确认后选房弹窗仍未关闭。
+    not_visible=当前查询名单没有该房间；只跳过本次检查，后续重新查询。
     到点抢订在放号前暂停准备，放号后持续重试；空闲候补在下一轮重新检查。
     到点抢订仍以 RELEASE_STOP_AFTER_SECONDS 作为本次窗口的最终截止。
     """
@@ -2214,6 +2271,13 @@ async def prepare_page(page: Page, room: RoomSpec, target: Target, *,
         return True
     except StopRequested:
         raise  # 停止信号不是填表失败，不再读取页面或截图。
+    except RoomNotVisibleError:
+        key = (target.key, f'{room.area}:{name}', '名单未显示')
+        if key not in SELECTION_DIAGNOSTICS_RECORDED:
+            SELECTION_DIAGNOSTICS_RECORDED.add(key)
+            logging.info('[房间未显示] %s:%s｜%s｜当前查询名单没有此房间；本次跳过，后续重新检查，其他房间继续',
+                         room.area, name, target.key)
+        return 'not_visible'
     except Exception as exc:
         logging.info("[表单耗时汇总] [%s] 未完成｜卡在%s｜已耗时%.2f秒", name, step,
                         monotonic_time.monotonic() - started)
@@ -2744,7 +2808,7 @@ async def confirm_and_book(page: Page, room: RoomSpec, job: BookingJob, *,
 
 async def release_worker(page: Page, room: RoomSpec, job: BookingJob,
                          opened: datetime, deadline: datetime,
-                         prepared: bool | None) -> str:
+                         prepared: bool | None | Literal['not_visible']) -> str:
     """单个会议室在同一放号窗口内持续抢订。
 
     放号前占用只暂停提前准备，放号后占用与技术异常均持续重试至截止。
@@ -2759,12 +2823,17 @@ async def release_worker(page: Page, room: RoomSpec, job: BookingJob,
         logging.info("[到点抢订] 提前准备暂停｜%s:%s｜%s｜目标时段占用/不可选；不重复提前准备，%s放号后恢复重试至%s",
                      room.area, room.name, job.target.key, opened.strftime('%H:%M:%S'),
                      deadline.strftime('%H:%M:%S'))
+    elif prepared == 'not_visible' and now_cn() < opened:
+        logging.info('[到点抢订] 提前准备暂停｜%s:%s｜%s｜当前名单未显示；%s放号后重新查询至%s',
+                     room.area, room.name, job.target.key, opened.strftime('%H:%M:%S'),
+                     deadline.strftime('%H:%M:%S'))
     await wait_until(opened)
     logging.info("[到点抢订] 单页进入抢订阶段｜%s:%s｜%s｜表单就绪=%s｜计划开放=%s｜当前=%s",
                  room.area, room.name, job.target.key, prepared,
                  opened.strftime('%H:%M:%S'), now_cn().strftime('%H:%M:%S.%f')[:-3])
     had_attempt = False
-    last_status = "occupied" if prepared is None else ("prepare_failed" if not prepared else "unavailable")
+    last_status = ('not_visible' if prepared == 'not_visible' else 'occupied' if prepared is None
+                   else 'unavailable' if prepared is True else 'prepare_failed')
 
     while (now_cn() < deadline and not STOP_REQUESTED.is_set() and not DRIVER_LOST.is_set()
            and not AUTH_BLOCKED.is_set() and not CONFIG_BLOCKED.is_set()
@@ -2772,7 +2841,7 @@ async def release_worker(page: Page, room: RoomSpec, job: BookingJob,
            and not job.done.is_set() and not job.uncertain.is_set()):
 
         selection_unavailable = False
-        if not prepared:
+        if prepared is not True:
             try:
                 prepared = await interruptible_preparation(
                     prepare_page(page, room, job.target),
@@ -2787,11 +2856,12 @@ async def release_worker(page: Page, room: RoomSpec, job: BookingJob,
             return "uncertain"
         if run_stop_reason() or (job.target.key, room.name) in GRID_SELECTOR_BLOCKED:
             break
-        if prepared:
+        if prepared is True:
             status = await confirm_and_book(page, room, job, deadline=deadline)
             had_attempt = True
         else:
-            status = "occupied" if selection_unavailable else "prepare_failed"
+            status = ('not_visible' if prepared == 'not_visible' else
+                      'occupied' if selection_unavailable else 'prepare_failed')
         last_status = status
 
         if status in ("success", "dry_run", "expired", "skipped", "uncertain"):
@@ -2799,14 +2869,14 @@ async def release_worker(page: Page, room: RoomSpec, job: BookingJob,
             return status
         if run_stop_reason() or (job.target.key, room.name) in GRID_SELECTOR_BLOCKED:
             break
-        if status not in ("occupied", "prepare_failed"):
+        if status not in ("occupied", "prepare_failed", "not_visible"):
             booking_result("到点抢订", job.target, room, status)
 
-        if prepared and status == "not_open":
+        if prepared is True and status == "not_open":
             btn = page.get_by_role("button", name=FINAL_BOOK_BUTTON, exact=True)
             await dismiss_advance_limit_dialog(page)
             prepared = await is_final_book_button_clickable(btn)
-            if prepared:
+            if prepared is True:
                 logging.info("[%s] 放号尚未生效，复用已确认表单，不重新填写", room.name)
         else:
             prepared = False
@@ -2820,6 +2890,10 @@ async def release_worker(page: Page, room: RoomSpec, job: BookingJob,
             logging.info("[到点抢订] 占用重试｜%s:%s｜%s｜%s；%.1f秒后刷新重试，截止=%s",
                          room.area, room.name, job.target.key, evidence,
                          min(RELEASE_RETRY_SECONDS, remaining), deadline.strftime('%H:%M:%S'))
+        elif status == 'not_visible':
+            logging.info('[到点抢订] 名单未显示重查｜%s:%s｜%s｜%.1f秒后刷新查询，截止=%s',
+                         room.area, room.name, job.target.key, min(RELEASE_RETRY_SECONDS, remaining),
+                         deadline.strftime('%H:%M:%S'))
         else:
             logging.info("[%s] 本次未订到（状态=%s），%.1f秒后重试", room.name, status,
                          min(RELEASE_RETRY_SECONDS, remaining))
@@ -2839,7 +2913,8 @@ async def release_worker(page: Page, room: RoomSpec, job: BookingJob,
         return "blocked"
     elif now_cn() >= deadline:
         booking_result("到点抢订", job.target, room, "expired",
-                       detail="本房间本次抢订结束；最后状态=" + last_status)
+                       detail="本房间本次抢订结束；最后状态="
+                       + ('当前名单未显示' if last_status == 'not_visible' else last_status))
         return "expired"
     elif not had_attempt:
         booking_result("到点抢订", job.target, room, last_status)
@@ -2847,10 +2922,10 @@ async def release_worker(page: Page, room: RoomSpec, job: BookingJob,
 
 
 async def prepare_until_release(page: Page, room: RoomSpec, target: Target,
-                                opened: datetime, deadline: datetime) -> bool | None:
+                                opened: datetime, deadline: datetime) -> bool | None | Literal['not_visible']:
     """提前准备期间每间独立重试，已准备成功的页面原样保留，等待放号。
 
-    明确不可选交给 release_worker 暂停准备并等放号；技术异常在放号前持续重试。
+    明确不可选或当前名单未显示交给 release_worker 暂停准备并等放号；技术异常在放号前持续重试。
     放号后由 release_worker 接管所有未就绪页面；不重新准备成功页面。
     """
     attempt = 0
@@ -2867,9 +2942,9 @@ async def prepare_until_release(page: Page, room: RoomSpec, target: Target,
         except PreparationInterrupted:
             return False
         last_result = ok
-        if ok is None:
-            return None
-        if ok:
+        if ok is None or ok == 'not_visible':
+            return ok
+        if ok is True:
             if attempt > 1:
                 logging.warning("[提前准备恢复] %s:%s｜%s｜第%d次尝试成功，等待放号",
                                 room.area, room.name, target.key, attempt)
@@ -2943,11 +3018,11 @@ async def run_release_batch(pool: PagePool, release_priority: asyncio.Event,
         if run_stop_reason():
             return
         counts = {phase: sum(value == phase for value in page_phases.values())
-                  for phase in ("就绪", "准备中", "等待页面", "准备异常", "占用待重试")}
-        logging.info("[到点抢订] 已到计划开放时刻｜计划=%s｜当前=%s｜表单就绪%d页｜准备中%d页｜等待页面%d页｜准备异常%d页｜占用待重试%d页；就绪页独立提交，未就绪及占用页继续重试至%s（此条不是提交回执）",
+                  for phase in ("就绪", "准备中", "等待页面", "准备异常", "占用待重试", "名单未显示")}
+        logging.info("[到点抢订] 已到计划开放时刻｜计划=%s｜当前=%s｜表单就绪%d页｜准备中%d页｜等待页面%d页｜准备异常%d页｜占用待重试%d页｜名单未显示%d页；就绪页独立提交，未就绪及占用页继续重试至%s（此条不是提交回执）",
                      opened.strftime('%H:%M:%S'), now_cn().strftime('%H:%M:%S.%f')[:-3],
                      counts["就绪"], counts["准备中"], counts["等待页面"],
-                     counts["准备异常"], counts["占用待重试"], deadline.strftime('%H:%M:%S'))
+                     counts["准备异常"], counts["占用待重试"], counts["名单未显示"], deadline.strftime('%H:%M:%S'))
 
     opening_observer = asyncio.create_task(observe_opening())
     try:
@@ -2987,7 +3062,8 @@ async def run_release_batch(pool: PagePool, release_priority: asyncio.Event,
                             else "stopped" if run_stop_reason() else "expired")
                 if run_stop_reason():
                     return "stopped"
-                page_phases[phase_key] = "就绪" if ready else ("占用待重试" if ready is None else "准备异常")
+                page_phases[phase_key] = ('就绪' if ready is True else '名单未显示' if ready == 'not_visible'
+                                          else '占用待重试' if ready is None else '准备异常')
                 logging.info("[到点抢订] 单页准备结果｜%s｜%s:%s｜就绪=%s",
                              target.key, room.area, room.name, ready)
                 # 每间准备好后独立等待放号，不等其它慢页的导航或控件超时。
@@ -3144,10 +3220,12 @@ async def watch_cycle(pages: list[Page] | AsyncIterator[Page], job: BookingJob, 
             return "skipped"
         if job.uncertain.is_set():
             return "uncertain"
+        if ready == 'not_visible':
+            return 'not_visible'
         if ready is None:
             # 页面已加载、目标房间已选中，但确认按钮禁用；继续定时捡漏。
             return "occupied"
-        if ready is False:
+        if ready is not True:
             # prepare_page 已打印带原因、阶段和耗时的一条异常，不再重复泛化结果。
             return "prepare_failed"
         if DRIVER_LOST.is_set() or AUTH_BLOCKED.is_set() or CONFIG_BLOCKED.is_set():
@@ -3198,12 +3276,13 @@ async def watch_cycle(pages: list[Page] | AsyncIterator[Page], job: BookingJob, 
     if should_yield():
         logging.info("[候补] 已停止填表和新提交，在途回执已收齐，交还工作页面给到点抢订")
     occupied = results.count("occupied")
+    not_visible = results.count('not_visible')
     failed_preparation = results.count("prepare_failed")
     submitted = sum(result in ("success", "failed", "dry_run", "expired", "not_open")
                     for result in results)
     success = results.count("success")
-    logging.info("[候补] 时段完成 %s｜检查%d间｜已占用/不可选%d间｜提交/模拟%d间｜准备异常%d间｜成功%d间｜耗时%.1f秒%s",
-                 job.target.key, len(workers), occupied, submitted,
+    logging.info("[候补] 时段完成 %s｜检查%d间｜已占用/不可选%d间｜名单未显示%d间｜提交/模拟%d间｜准备异常%d间｜成功%d间｜耗时%.1f秒%s",
+                 job.target.key, len(workers), occupied, not_visible, submitted,
                  failed_preparation, success, monotonic_time.monotonic()-cycle_started,
                  ("｜提交结果待核实，暂停该时段" if job.uncertain.is_set() and not job.done.is_set()
                   else ""))

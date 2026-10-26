@@ -129,15 +129,27 @@ class SelectedRoomsProfileBrowserTests(unittest.IsolatedAsyncioTestCase):
             await core.choose_room_cells(self.page, "2-A48R", 1, self.target)
         await self.assert_no_grid_clicks()
 
-    async def test_missing_selected_room_blocks_the_incomplete_roster(self):
+    async def test_missing_selected_room_only_blocks_that_target(self):
         await self.page.set_content(selected_rooms_html(missing="2-B35R"))
         observed = await core.read_visible_room_names(self.page)
         self.assertEqual(len(observed), 3)
         self.assertFalse(core.rooms_match_area(observed, AREA))
-        for name in SELECTED:
-            with self.subTest(name=name), self.assertRaises(core.SelectorConfigurationError):
-                await self.select_room(name)
+        self.assertTrue(core.rooms_match_area(observed, AREA, allow_partial=True))
+        with self.assertRaises(core.RoomNotVisibleError):
+            await self.select_room("2-B35R")
+        with self.assertRaises(core.RoomNotVisibleError):
+            await core.choose_room_cells(self.page, "2-B35R", 3, self.target)
         await self.assert_no_grid_clicks()
+        for name, actual_row in zip(SELECTED, CONFIRMED_ROWS):
+            if name == "2-B35R":
+                continue
+            with self.subTest(name=name, actual_row=actual_row):
+                await self.page.set_content(selected_rooms_html(missing="2-B35R"))
+                await self.select_room(name)
+                self.assertEqual(await self.page.evaluate("window.clicked"),
+                                 [f"room{actual_row}-21", f"room{actual_row}-24"])
+                self.assertTrue(await self.page.locator("#confirm").is_enabled())
+                self.assertEqual(await self.page.evaluate("window.redraws"), 1)
 
     async def test_similar_suffix_cannot_replace_a_missing_exact_target(self):
         await self.page.set_content(selected_rooms_html(suffix_replacement=True))
@@ -145,9 +157,11 @@ class SelectedRoomsProfileBrowserTests(unittest.IsolatedAsyncioTestCase):
         observed = await core.read_visible_room_names(self.page)
         self.assertEqual([core.room_short_name(room["name"]) for room in observed],
                          ["2-A50R", "2-B35R", "2-B41R"])
-        with self.assertRaises(core.SelectorConfigurationError):
+        self.assertFalse(core.rooms_match_area(observed, AREA))
+        self.assertTrue(core.rooms_match_area(observed, AREA, allow_partial=True))
+        with self.assertRaises(core.RoomNotVisibleError):
             await self.select_room("2-A48R")
-        with self.assertRaises(core.SelectorConfigurationError):
+        with self.assertRaises(core.RoomNotVisibleError):
             await core.choose_room_cells(self.page, "2-A48R", 1, self.target)
         await self.assert_no_grid_clicks()
 

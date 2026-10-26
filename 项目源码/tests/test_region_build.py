@@ -240,6 +240,8 @@ class RegionBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.stack.enter_context(patch.object(self.core, "ROOM_SHORT_NAME_PATTERN", profile["short_name_pattern"]))
         expected = {key: tuple(value["rooms"]) for key, value in profile["room_catalog"].items()}
         self.stack.enter_context(patch.object(self.core, "AREA_EXPECTED_SHORT_NAMES", expected))
+        self.stack.enter_context(patch.object(self.core, "AREA_ROOM_ROWS", {
+            key: dict(value["rooms"]) for key, value in profile["room_catalog"].items()}))
         rooms = profile["room_catalog"][area]["rooms"]
         with patch.object(self.fixture, "ROOMS", tuple(rooms)):
             html = self.fixture.fixture_html(**fixture_options)
