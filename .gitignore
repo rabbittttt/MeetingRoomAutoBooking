@@ -1,0 +1,24 @@
+# 授权名单、签名授权文档及私钥仅在本地维护。
+账号授权.json
+签发验证.json
+accounts.txt
+admin_private_key.pem
+*private*.pem
+*.key
+*.p12
+*.pfx
+
+# 本机凭据和浏览器登录资料。
+.env
+.env.*
+credentials.json
+token.json
+chrome_profile/
+browser_profile/
+
+# Python临时缓存；现有构建产物按项目备份要求保留。
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# 保留既有PyInstaller构建快照中的启动模块。
+!项目源码/build/**/localpycs/*.pyc

@@ -1,0 +1,27 @@
+{
+  "source": "用户从公司电脑复制的诊断摘要；此文件是关键字段摘录，不是完整原始DOM",
+  "file": "181311_562860_格子结构_1F-A11R.json",
+  "room": "1F-A11R",
+  "row": 2,
+  "target": {"date": "2026-10-21", "start": "10:00", "end": "12:00"},
+  "stage": "确认按钮未就绪",
+  "confirm": {"cls": "ev_button primary disabled", "disabled": true},
+  "detected_selected_classes": ["ev_paging_page ev_paging_selected"],
+  "cells": [
+    {"column":21,"cls":"order","rect":{"x":631,"y":314,"w":30,"h":24},"background":"rgba(0, 0, 0, 0.18)"},
+    {"column":24,"cls":"order","rect":{"x":721,"y":314,"w":30,"h":24},"background":"rgba(0, 0, 0, 0.18)"}
+  ],
+  "rows": {"children":48,"width":1440,"height":24,"x":31,"first_four_y":[290,314,338,362]},
+  "earlier_watch_snapshot": {"room":"1F-A12R","row":3,"date":"2026-10-19","start":"16:00","end":"18:00","columns":[33,36],"cell_x":[991,1081],"cell_y":338,"viewport":{"x":509,"y":290,"w":784,"h":250}},
+  "before_opening": [
+    {"file":"181027_275035_格子结构_1F-A11R.json","room":"1F-A11R","classes":["order","order"],"confirm_disabled":true,"cell_y":314},
+    {"file":"181035_146045_格子结构_1F-A12R.json","room":"1F-A12R","classes":["order","order"],"confirm_disabled":true,"cell_y":338},
+    {"file":"181043_779939_格子结构_1F-A14R.json","room":"1F-A14R","classes":["order","order"],"confirm_disabled":true,"cell_y":386},
+    {"file":"181046_146884_格子结构_1F-A15R.json","room":"1F-A15R","classes":["order","order"],"confirm_disabled":true,"cell_y":410},
+    {"file":"181050_645618_格子结构_1F-A26R.json","room":"1F-A26R","classes":["hover order","hover order"],"confirm_disabled":true,"cell_y":515},
+    {"file":"181053_135672_格子结构_1F-A17R.json","room":"1F-A17R","classes":["order","order"],"confirm_disabled":true,"cell_y":458},
+    {"file":"181055_717417_格子结构_1F-A18R.json","room":"1F-A18R","classes":["order","order"],"confirm_disabled":true,"cell_y":482}
+  ],
+  "conclusion": "七间房在18:11前已处于order且确认禁用，不能把这些页面解释为18:11触发晚才变为不可选。结合用户描述更像既有占用；程序设置的放号时间不能改变网站实际放号规则。节点重绘及旧全页序号误选是另外已复现的程序缺陷。",
+  "limit": "缺少服务器预约详情/占用回执，order类及灰底不作为独立的服务器占用回执；未将这些房间在网站中真实提交验证。"
+}

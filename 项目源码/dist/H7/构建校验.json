@@ -1,0 +1,24 @@
+{
+  "successful": true,
+  "deployment_id": "H7",
+  "embedded_modules_match": [
+    "booking_core",
+    "booking_profile",
+    "account_auth",
+    "account_public_key",
+    "gui_diagnostics",
+    "window_chrome",
+    "date_picker",
+    "build_info",
+    "会议室自动抢订_GUI"
+  ],
+  "manager_module_absent": true,
+  "deployment_profiles_module_absent": true,
+  "external_license_matches": true,
+  "exe": "D:\\05 AI脚本\\PythonProject\\网页操作\\MeetingRoomAutoBooking\\项目源码\\dist\\H7\\会议室自动抢订_H7.exe",
+  "stage": "D:\\05 AI脚本\\PythonProject\\网页操作\\MeetingRoomAutoBooking\\项目源码\\build\\region_sources\\H7",
+  "exe_bytes": 56956291,
+  "core_sha256": "4ff9d6940f1d15a4198db3102eb74ae7a68085e252fb82ce657e809fcfa45308",
+  "profile_sha256": "f3cd9597e3f6adb2c2ca0afc5bb11ea31e90f3e4f7f80d2e4b8480845243a300",
+  "exe_sha256": "c1000e4ba02dd01b56c58871300b1ad8507b2f5192803b7f0c5896d3da28f13e"
+}

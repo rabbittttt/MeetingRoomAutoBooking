@@ -1,0 +1,516 @@
+{
+  "scope": "Offline regression; excludes BrowserTests/PipelineBrowserTests and test_window_*",
+  "core_sha256_before": "4ff9d6940f1d15a4198db3102eb74ae7a68085e252fb82ce657e809fcfa45308",
+  "included_tests": [
+    "tests.test_account_auth.AccountAuthorizationTests.test_account_count_limit_rejected",
+    "tests.test_account_auth.AccountAuthorizationTests.test_admin_bad_private_key_does_not_replace_existing_license",
+    "tests.test_account_auth.AccountAuthorizationTests.test_admin_empty_list_does_not_replace_existing_license",
+    "tests.test_account_auth.AccountAuthorizationTests.test_admin_missing_private_key_does_not_replace_existing_license",
+    "tests.test_account_auth.AccountAuthorizationTests.test_admin_normalizes_and_deduplicates_editor_input",
+    "tests.test_account_auth.AccountAuthorizationTests.test_admin_self_test_does_not_read_real_private_key",
+    "tests.test_account_auth.AccountAuthorizationTests.test_admin_signs_external_list_accepted_by_verifier",
+    "tests.test_account_auth.AccountAuthorizationTests.test_allows_signed_current_account",
+    "tests.test_account_auth.AccountAuthorizationTests.test_blank_os_identity_denies",
+    "tests.test_account_auth.AccountAuthorizationTests.test_canonical_payload_does_not_depend_on_key_order",
+    "tests.test_account_auth.AccountAuthorizationTests.test_denies_unlisted_account_with_actionable_error",
+    "tests.test_account_auth.AccountAuthorizationTests.test_document_shape_is_strict",
+    "tests.test_account_auth.AccountAuthorizationTests.test_duplicate_json_keys_deny",
+    "tests.test_account_auth.AccountAuthorizationTests.test_empty_external_file_denies",
+    "tests.test_account_auth.AccountAuthorizationTests.test_external_file_allows_valid_document",
+    "tests.test_account_auth.AccountAuthorizationTests.test_frozen_license_is_next_to_exe_not_bundle_temp",
+    "tests.test_account_auth.AccountAuthorizationTests.test_invalid_public_key_fails",
+    "tests.test_account_auth.AccountAuthorizationTests.test_invalid_signature_encoding_and_length_fail",
+    "tests.test_account_auth.AccountAuthorizationTests.test_malformed_json_and_bad_utf8_deny",
+    "tests.test_account_auth.AccountAuthorizationTests.test_missing_external_file_denies",
+    "tests.test_account_auth.AccountAuthorizationTests.test_missing_public_key_denies",
+    "tests.test_account_auth.AccountAuthorizationTests.test_non_windows_denies_even_if_username_environment_is_allowed",
+    "tests.test_account_auth.AccountAuthorizationTests.test_normalizes_windows_domain_and_case",
+    "tests.test_account_auth.AccountAuthorizationTests.test_os_api_failure_denies",
+    "tests.test_account_auth.AccountAuthorizationTests.test_os_api_identity_wins_over_environment_spoof",
+    "tests.test_account_auth.AccountAuthorizationTests.test_oversized_external_file_denies_before_parse",
+    "tests.test_account_auth.AccountAuthorizationTests.test_payload_shape_is_strict",
+    "tests.test_account_auth.AccountAuthorizationTests.test_real_windows_api_ignores_username_environment",
+    "tests.test_account_auth.AccountAuthorizationTests.test_signed_empty_or_malformed_accounts_rejected",
+    "tests.test_account_auth.AccountAuthorizationTests.test_signed_unknown_schema_or_license_version_rejected",
+    "tests.test_account_auth.AccountAuthorizationTests.test_signed_wrong_app_is_rejected",
+    "tests.test_account_auth.AccountAuthorizationTests.test_source_license_is_next_to_module",
+    "tests.test_account_auth.AccountAuthorizationTests.test_tampered_account_list_fails_signature",
+    "tests.test_account_auth.AccountAuthorizationTests.test_unreadable_license_denies",
+    "tests.test_account_auth.AccountAuthorizationTests.test_verification_does_not_mutate_document",
+    "tests.test_account_auth.AccountAuthorizationTests.test_wrong_signing_key_fails",
+    "tests.test_auth_entrypoints.AccountEntryTests.test_authorization_diagnostic_accepts_validated_identity",
+    "tests.test_auth_entrypoints.AccountEntryTests.test_authorization_diagnostic_returns_denial",
+    "tests.test_auth_entrypoints.AccountEntryTests.test_gui_denial_never_constructs_working_window",
+    "tests.test_auth_entrypoints.AccountEntryTests.test_headless_core_denial_never_creates_browser",
+    "tests.test_auth_entrypoints.AccountEntryTests.test_start_denial_never_reads_configuration_or_starts_worker",
+    "tests.test_auth_entrypoints.DiagnosticsTests.test_callback_trace_is_retained_and_popup_is_not_repeated",
+    "tests.test_auth_entrypoints.DiagnosticsTests.test_existing_fault_handler_is_not_disabled",
+    "tests.test_date_errors.DateErrorTests.test_ambiguous_month_control_preserves_selector_configuration_error",
+    "tests.test_date_errors.DateErrorTests.test_prepare_stops_globally_on_ambiguous_date_without_selecting_room",
+    "tests.test_date_errors.DateErrorTests.test_unsupported_year_only_blocks_current_target_and_room",
+    "tests.test_date_picker.DateGridEvidenceTests.test_broken_neighbor_sequence_is_rejected",
+    "tests.test_date_picker.DateGridEvidenceTests.test_duplicate_27_resolves_to_full_current_month",
+    "tests.test_date_picker.DateGridEvidenceTests.test_two_complete_months_are_rejected",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_area_identifiers_cannot_contain_paths",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_bad_short_names_are_rejected",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_counts_must_match_catalog_and_be_positive_integers",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_duplicate_noninteger_and_noncontinuous_rows_are_rejected",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_empty_city_zone_and_labels_are_rejected",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_f5_preserves_confirmed_roster_and_release_rules",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_full_name_rules_do_not_accept_other_site",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_h7_missing_any_room_rejects_build_and_render",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_h7_preserves_user_supplied_fifteen_rooms_in_page_order",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_invalid_advance_days_are_rejected",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_invalid_opening_clock_is_rejected",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_invalid_regex_and_capture_shape_are_rejected",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_profile_copy_cannot_change_original_or_later_lookup",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_profile_identifiers_cannot_contain_paths",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_real_full_names_extract_profile_short_names",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_render_contains_only_selected_profile_literal_and_round_trips_utf8",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_schema_rejects_missing_fields_and_embedded_unselected_profiles",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_selected_profile_is_independent_of_incomplete_other_profile",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_short_name_format_accepts_optional_floor_f_without_changing_official_roster",
+    "tests.test_deployment_profiles.DeploymentProfileTests.test_unknown_profile_and_inconsistent_internal_id_are_rejected",
+    "tests.test_logging.ConciseLogFilterTests.test_default_hides_detail_but_keeps_progress",
+    "tests.test_logging.ConciseLogFilterTests.test_default_keeps_every_warning_error_and_booking_result",
+    "tests.test_logging.ConciseLogFilterTests.test_error_traceback_is_not_filtered",
+    "tests.test_logging.ConciseLogFilterTests.test_verbose_mode_keeps_all_detail",
+    "tests.test_logging.LoggingOutputTests.test_file_keeps_details_and_tracebacks_while_gui_is_concise",
+    "tests.test_logging.LoggingOutputTests.test_verbose_gui_displays_details_and_full_format",
+    "tests.test_logging.PrepareErrorMessageTests.test_detached_variants_are_readable",
+    "tests.test_logging.PrepareErrorMessageTests.test_empty_exception_is_safe",
+    "tests.test_logging.PrepareErrorMessageTests.test_timeout_is_readable_and_unknown_error_keeps_first_line",
+    "tests.test_logging.StartupSummaryTests.test_both_shows_all_counts",
+    "tests.test_logging.StartupSummaryTests.test_discovery_shows_no_task_counts",
+    "tests.test_logging.StartupSummaryTests.test_release_only_shows_release_counts",
+    "tests.test_logging.StartupSummaryTests.test_watch_only_shows_watch_count",
+    "tests.test_logging.WatchLogTests.test_prepare_failure_has_one_main_warning_and_summary_count",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_403_still_blocks_all_modes_and_never_delivers_failed_tab",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_cancelled_authentication_is_closed_and_not_retried",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_deadline_at_timeout_stops_auth_retry_before_new_page",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_driver_disconnect_still_stops_all_modes_without_screenshot",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_existing_worker_success_interrupts_auth_retry_wait",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_global_environment_failure_interrupts_authentication_without_caller_check",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_global_environment_failure_interrupts_retry_wait_without_caller_check",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_missing_form_auth_wait_timeout_is_recoverable",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_navigation_timeout_closes_failed_tab_without_global_auth_block",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_no_stop_condition_does_not_retry_unboundedly",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_release_retries_failed_authentication_and_delivers_only_verified_page",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_unknown_error_is_reported_without_treating_it_as_auth_denial",
+    "tests.test_page_pool_recovery.PagePoolRecoveryTests.test_watch_returns_from_failed_allocation_and_authenticates_next_round",
+    "tests.test_region_build.RegionBuildTests.test_build_command_uses_selected_stage_and_separate_output_work_spec_paths",
+    "tests.test_region_build.RegionBuildTests.test_explicit_other_deployment_config_is_rejected_before_runtime_mutation",
+    "tests.test_region_build.RegionBuildTests.test_f5_and_h7_import_correct_runtime_defaults_and_use_isolated_data",
+    "tests.test_region_build.RegionBuildTests.test_repeated_f5_h7_f5_staging_preserves_sources_and_default_profile",
+    "tests.test_region_build.RegionBuildTests.test_stage_contains_only_selected_profile_and_runtime_modules",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_cancelled_batch_drains_opening_observer",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_closed_selection_but_disabled_final_is_not_classified_occupied",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_continuous_occupancy_retries_to_exact_deadline_without_submitting",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_disabled_confirmation_before_opening_is_unfinished_not_structure_failure",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_disabled_control_alone_is_not_occupied_evidence",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_explicit_occupied_submission_refreshes_and_retries",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_missing_confirmation_control_remains_technical_failure",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_none_at_opening_retains_unfinished_state_for_worker",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_not_open_response_reuses_ready_form_and_can_succeed",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_occupied_retry_stops_when_peer_succeeds_or_result_is_uncertain",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_opening_snapshot_is_not_blocked_by_preparation",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_preparation_none_stops_at_first_attempt_before_opening",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_real_technical_failure_still_retries_and_can_become_ready",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_repeated_server_occupancy_also_runs_to_deadline",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_transient_grid_failure_is_diagnosed_and_next_attempt_can_prepare",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_unavailable_after_opening_keeps_retrying_and_can_recover",
+    "tests.test_release_regressions.ReleaseFailureRegressionTests.test_unavailable_selection_waits_for_opening_before_repreparing",
+    "tests.test_release_scheduler.ReleaseCalendarTests.test_different_meeting_dates_share_one_actual_release_batch",
+    "tests.test_release_scheduler.ReleaseCalendarTests.test_same_target_uses_distinct_area_opening_days",
+    "tests.test_release_scheduler.ReleaseCalendarTests.test_weekly_expansion_crosses_month_and_merges_manual_area",
+    "tests.test_release_scheduler.ReleaseSchedulingTests.test_external_cancellation_drains_workers_and_clears_priority",
+    "tests.test_release_scheduler.ReleaseSchedulingTests.test_ready_room_starts_without_waiting_for_slow_preparation",
+    "tests.test_release_scheduler.ReleaseSchedulingTests.test_release_existing_unknown_skips_only_its_own_target",
+    "tests.test_release_scheduler.ReleaseSchedulingTests.test_stop_drains_siblings_before_releasing_pool",
+    "tests.test_release_scheduler.ReleaseSchedulingTests.test_watch_existing_unknown_skips_only_its_own_target",
+    "tests.test_release_scheduler.ReleaseSchedulingTests.test_watch_keeps_same_target_submissions_parallel",
+    "tests.test_release_scheduler.ReleaseSchedulingTests.test_watch_ready_room_submits_and_success_stops_slow_room",
+    "tests.test_release_scheduler.ReleaseSchedulingTests.test_watch_unknown_result_blocks_later_room",
+    "tests.test_release_scheduler.ReleaseSchedulingTests.test_worker_exception_drains_siblings_before_releasing_pool",
+    "tests.test_room_catalog.RoomCatalogTests.test_admin_duplicate_rows_and_invalid_rows_fail_early",
+    "tests.test_room_catalog.RoomCatalogTests.test_admin_invalid_opening_rules_and_empty_labels_fail_early",
+    "tests.test_room_catalog.RoomCatalogTests.test_apply_rejects_tampering_before_changing_active_selection",
+    "tests.test_room_catalog.RoomCatalogTests.test_default_selection_is_independent_of_catalog_and_other_callers",
+    "tests.test_room_catalog.RoomCatalogTests.test_external_selection_cannot_add_room_area_or_raw_row",
+    "tests.test_room_catalog.RoomCatalogTests.test_f5_1a_legacy_integer_bypass_is_rejected",
+    "tests.test_room_catalog.RoomCatalogTests.test_only_changing_source_catalog_drives_gui_defaults_and_preview",
+    "tests.test_room_catalog.RoomCatalogTests.test_selected_room_uses_compiled_row",
+    "tests.test_room_catalog.RoomSelectionMigrationTests.test_absent_selection_defaults_to_all_current_rooms",
+    "tests.test_room_catalog.RoomSelectionMigrationTests.test_config_without_rooms_uses_current_catalog_not_cached_defaults",
+    "tests.test_room_catalog.RoomSelectionMigrationTests.test_existing_selection_keeps_only_current_catalog_names",
+    "tests.test_room_catalog.RoomSelectionMigrationTests.test_explicit_empty_selection_stays_empty",
+    "tests.test_room_catalog.RoomSelectionMigrationTests.test_load_config_migrates_without_changing_other_preferences",
+    "tests.test_room_catalog.RoomSelectionMigrationTests.test_malformed_saved_selection_does_not_select_arbitrary_rows",
+    "tests.test_shutdown.ShutdownTests.test_environment_event_wakes_future_release_wait",
+    "tests.test_shutdown.ShutdownTests.test_environment_events_wake_long_sleep",
+    "tests.test_shutdown.ShutdownTests.test_mode_failure_drains_in_flight_reply_without_cancelling_it",
+    "tests.test_shutdown.ShutdownTests.test_mode_failure_preserves_original_error_and_wakes_other_mode",
+    "tests.test_stop_messages.StopMessageTests.test_already_started_watch_target_has_explicit_reason_and_no_page_access",
+    "tests.test_stop_messages.StopMessageTests.test_config_block_prevents_entering_prepare_page",
+    "tests.test_stop_messages.StopMessageTests.test_environment_failure_interrupts_unsubmitted_release_preparation",
+    "tests.test_stop_messages.StopMessageTests.test_environment_reason_has_priority_over_internal_stop_signal",
+    "tests.test_stop_messages.StopMessageTests.test_late_start_enters_real_preparation_without_false_early_prepare_result",
+    "tests.test_stop_messages.StopMessageTests.test_main_reports_structure_failure_instead_of_user_stop",
+    "tests.test_stop_messages.StopMessageTests.test_occupied_result_records_fact_without_promising_another_attempt",
+    "tests.test_stop_messages.StopMessageTests.test_preexisting_stop_does_not_promise_occupied_page_will_resume",
+    "tests.test_stop_messages.StopMessageTests.test_stop_after_explicit_occupied_receipt_does_not_refresh",
+    "tests.test_stop_messages.StopMessageTests.test_stop_after_occupied_preparation_does_not_log_or_schedule_retry",
+    "tests.test_stop_messages.StopMessageTests.test_stop_requested_in_preparation_is_not_reported_as_form_error",
+    "tests.test_stop_messages.StopMessageTests.test_success_receipt_still_wins_when_stop_arrives_after_submission",
+    "tests.test_stop_messages.StopMessageTests.test_watch_terminal_summary_distinguishes_success_uncertain_and_started",
+    "tests.test_submission.DismissalTests.test_initial_submit_does_not_query_old_toasts",
+    "tests.test_submission.DismissalTests.test_modal_is_hidden_before_returning_without_extra_retry_sleep",
+    "tests.test_submission.DismissalTests.test_stale_toast_cannot_be_used_as_next_submission_result",
+    "tests.test_submission.FeedbackTests.test_driver_disconnect_is_propagated_instead_of_timeout",
+    "tests.test_submission.SubmissionTests.test_click_exception_does_not_authorize_blind_retry",
+    "tests.test_submission.SubmissionTests.test_driver_loss_after_click_preserves_uncertainty",
+    "tests.test_submission.SubmissionTests.test_environment_failure_during_last_button_check_prevents_click",
+    "tests.test_submission.SubmissionTests.test_explicit_occupied_does_not_depend_on_result_popup_closing",
+    "tests.test_submission.SubmissionTests.test_explicit_other_failure_keeps_ten_extra_retries",
+    "tests.test_submission.SubmissionTests.test_explicit_rejection_retries_after_interval_but_waits_for_new_reply",
+    "tests.test_submission.SubmissionTests.test_inflight_success_still_wins_after_peer_becomes_uncertain",
+    "tests.test_submission.SubmissionTests.test_meeting_start_arriving_during_last_button_check_prevents_click",
+    "tests.test_submission.SubmissionTests.test_peer_success_during_last_button_check_prevents_new_click",
+    "tests.test_submission.SubmissionTests.test_retry_wait_precedes_button_state_check_after_dismissal",
+    "tests.test_submission.SubmissionTests.test_stop_arriving_during_last_button_check_prevents_click",
+    "tests.test_submission.SubmissionTests.test_submission_before_deadline_can_receive_success_after_deadline",
+    "tests.test_submission.SubmissionTests.test_success_has_priority_over_shared_uncertainty",
+    "tests.test_submission.SubmissionTests.test_success_is_shared_before_reading_popup_text",
+    "tests.test_submission.SubmissionTests.test_uncertainty_shared_across_modes_blocks_new_submission",
+    "tests.test_submission.SubmissionTests.test_unknown_popup_does_not_authorize_another_submission",
+    "tests.test_submission.SubmissionTests.test_unresolved_submission_is_not_clicked_again",
+    "tests.test_timing_handover.TimingHandoverTests.test_first_ready_page_prepares_and_releases_while_second_page_authenticates",
+    "tests.test_timing_handover.TimingHandoverTests.test_manual_schedule_keeps_future_batches_after_old_target_drops_out",
+    "tests.test_timing_handover.TimingHandoverTests.test_wait_until_reaches_exact_target_with_fractional_last_wait",
+    "tests.test_watch_handover.WatchHandoverTests.test_inflight_explicit_failure_yields_without_retry",
+    "tests.test_watch_handover.WatchHandoverTests.test_inflight_not_open_yields_without_retry",
+    "tests.test_watch_handover.WatchHandoverTests.test_inflight_success_wins_over_handover_request",
+    "tests.test_watch_handover.WatchHandoverTests.test_inflight_unknown_result_stays_uncertain_on_handover",
+    "tests.test_watch_handover.WatchHandoverTests.test_no_handover_argument_preserves_ordinary_submission",
+    "tests.test_watch_handover.WatchHandoverTests.test_priority_already_set_prevents_submission",
+    "tests.test_watch_handover.WatchHandoverTests.test_priority_at_last_button_check_prevents_new_submission",
+    "tests.test_watch_handover.WatchHandoverTests.test_priority_set_when_prepare_finishes_prevents_submit",
+    "tests.test_watch_handover.WatchHandoverTests.test_real_page_pool_authentication_does_not_block_first_submission_or_cancel_its_receipt",
+    "tests.test_watch_handover.WatchHandoverTests.test_real_page_pool_can_yield_while_waiting_for_activation_lock",
+    "tests.test_watch_handover.WatchHandoverTests.test_real_page_pool_closes_page_created_after_handover_without_authenticating_it",
+    "tests.test_watch_handover.WatchHandoverTests.test_real_page_pool_retains_authenticated_page_for_reuse",
+    "tests.test_watch_handover.WatchHandoverTests.test_real_page_pool_yields_existing_page_then_cancels_unfinished_authentication",
+    "tests.test_watch_handover.WatchHandoverTests.test_watch_cancels_slow_preparation_and_waits_for_cleanup",
+    "tests.test_watch_handover.WatchHandoverTests.test_watch_does_not_cancel_final_click_already_in_progress",
+    "tests.test_watch_handover.WatchHandoverTests.test_watch_keeps_inflight_page_until_success_while_cancelling_other_prepare",
+    "tests.test_watch_handover.WatchHandoverTests.test_watch_priority_before_cycle_does_not_prepare_or_submit"
+  ],
+  "excluded": [
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_different_values_are_not_collapsed",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_distinct_positions_remain_ambiguous",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_hidden_option_copy_does_not_block_visible_option",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_identical_markup_is_not_node_identity",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_inserted_city_control_cannot_retarget_selected_building",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_multiple_visible_dialogs_remain_ambiguous",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_nested_containers_sharing_one_arrow",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_overlapping_copies_choose_pointer_target",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_recorded_id_outside_active_dialog_ignored",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_switch_both_areas_and_validate_all_16_room_identities",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_text_fallback_cannot_reach_outside_dialog",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_area_filters.AreaFilterBrowserTests.test_text_fallback_collects_different_labels_before_resolving",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_already_correct_does_not_open_calendar",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_ambiguous_owned_input_is_rejected",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_company_data_value_selects_october_27_not_disabled_september_27",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_company_disabled_class_is_respected_without_aria_disabled",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_disabled_date_is_retryable",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_duplicate_27_and_hidden_copy",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_full_date_attribute_precedes_repeated_day_label",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_leap_february",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_month_start_and_end",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_month_switch_redraw_with_portal_options",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_only_month_label_uses_owned_input_year",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_stop_exception_propagates_without_click_or_diagnostic",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_two_visible_calendars_rejected_without_clicking_day",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_date_picker.DatePickerBrowserTests.test_wrong_receipt_cannot_succeed_and_diagnostic_is_local",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_first_room_cells.FirstRoomCellBrowserTests.test_background_first_match_is_ignored_and_actual_a05_cells_clicked",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_first_room_cells.FirstRoomCellBrowserTests.test_half_hour_boundaries_preserve_first_and_inclusive_end_columns",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_first_room_cells.FirstRoomCellBrowserTests.test_nearby_header_inside_dialog_is_ignored",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_first_room_cells.FirstRoomCellBrowserTests.test_two_real_candidates_in_same_room_row_are_rejected_before_any_click",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_all_later_rows_use_actual_room_layout_not_global_sibling_index",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_each_endpoint_scrolls_into_view_without_clicking_neighbor_row",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_end_row_temporarily_hidden_after_start_recovers_without_double_click",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_full_unlabelled_48_half_hour_grid_remains_supported",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_grid_initial_render_delay_recovers",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_later_row_redraw_does_not_repeat_start_or_choose_neighbor",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_observed_30_by_24_grid_at_scroll_478_selects_16_to_18",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_real_width_scroller_reveals_start_before_relocating_end",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_same_room_two_distinct_grid_candidates_are_rejected_before_click",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_second_row_never_uses_adjacent_first_row_within_old_42px_tolerance",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_start_click_replacing_whole_first_row_still_selects_end_once",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_thirteen_pages_concurrently_keep_their_own_room_and_range",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_grid_regressions.DynamicGridBrowserTests.test_unlabelled_partial_day_grid_is_not_assumed_to_start_at_midnight",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_page_activation.PageActivationBrowserTests.test_concurrent_page_initialization_does_not_steal_focus_before_ready",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_page_activation.PageActivationBrowserTests.test_first_authentication_activates_without_waiting_for_calendar",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_page_activation.PageActivationBrowserTests.test_native_activation_initializes_calendar_without_manual_click",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_page_activation.PageActivationBrowserTests.test_prepare_reactivates_after_initial_navigation_and_every_reload",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_pipeline.ReleasePipelineBrowserTests.test_cutoff_cancels_unsubmitted_preparation_and_releases_pool",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_pipeline.ReleasePipelineBrowserTests.test_disabled_and_noop_confirm_never_click_background_final_button",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_pipeline.ReleasePipelineBrowserTests.test_half_past_start_and_end_follow_actual_selected_columns",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_pipeline.ReleasePipelineBrowserTests.test_occupied_after_opening_rechecks_until_deadline_without_final_click",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_pipeline.ReleasePipelineBrowserTests.test_occupied_before_opening_waits_then_refreshes_and_books_after_release",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_pipeline.ReleasePipelineBrowserTests.test_occupied_room_does_not_stop_ready_peer_at_opening",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_pipeline.ReleasePipelineBrowserTests.test_slow_preparation_does_not_block_a_ready_room_at_opening",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_pipeline.ReleasePipelineBrowserTests.test_stop_cancels_unsubmitted_preparation_and_releases_pool",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_pipeline.ReleasePipelineBrowserTests.test_thirteen_real_forms_prepare_then_only_submit_after_opening",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_region_build.RegionBrowserTests.test_f5_names_and_grid_continue_to_work",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_region_build.RegionBrowserTests.test_h7_full_names_are_read_and_first_last_rows_select_correct_grid",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_region_build.RegionBrowserTests.test_h7_wrong_row_is_rejected_without_clicking_neighbor",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_confirm_button_outside_selection_does_not_make_inner_button_ambiguous",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_custom_confirm_text_can_close_selection_without_button_role",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_direct_confirmation_waits_for_actual_async_selection_close",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_disabled_custom_confirm_parent_is_not_treated_as_ready",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_disabled_selection_confirm_blocks_visible_background_final",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_dry_run_does_not_accept_background_final_while_selection_stays_open",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_old_selection_closing_with_new_selection_open_is_not_ready",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_prepare_does_not_accept_background_final_while_selection_stays_open",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_prepare_waits_for_actual_async_selection_close",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_real_submit_does_not_click_background_final_while_selection_stays_open",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_replacing_selection_dom_does_not_count_as_closing",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_selection_confirmation_can_enable_after_grid_update",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_selection_reappearing_during_real_retry_is_never_dismissed_or_submitted",
+      "reason": "browser tests run separately"
+    },
+    {
+      "test": "tests.test_selection_transition.SelectionTransitionBrowserTests.test_visible_confirm_without_button_role_still_blocks_background",
+      "reason": "browser tests run separately"
+    },
+    {
+      "module": "test_window_chrome.py",
+      "reason": "window GUI tests run separately"
+    },
+    {
+      "module": "test_window_drag.py",
+      "reason": "window GUI tests run separately"
+    }
+  ],
+  "tests_run": 202,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "successful": true,
+  "core_sha256_after": "4ff9d6940f1d15a4198db3102eb74ae7a68085e252fb82ce657e809fcfa45308"
+}

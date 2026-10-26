@@ -1,0 +1,13 @@
+{
+  "app_name": "会议室自动抢订",
+  "core_source": "会议室预定.py",
+  "gui_entry": "会议室自动抢订_GUI.py",
+  "clean_build": true,
+  "extra_dependencies": [{"module": "cryptography", "pip": "cryptography>=46.0.0"}],
+  "hidden_imports": [],
+  "collect_all": [
+    "playwright"
+  ],
+  "data_files": [],
+  "module_paths": []
+}
