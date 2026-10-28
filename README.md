@@ -34,3 +34,25 @@ python build_exe.py --profile B2a
 更新程序时只替换EXE，保留使用者已有的授权文件。
 
 具体设置和操作见 `项目源码/使用说明.txt`、`项目源码/区域打包说明.txt`。
+
+## W3备用登录
+
+高级设置可单独保存本机W3账号密码。原有自动登录优先，仅在已核验的
+`https://login.huawei.com` 账号登录页使用备用凭据，一次运行最多自动提交一次密码。
+验证码和二次验证由使用者手动完成。
+
+凭据使用Windows当前用户加密，保存在
+`%LOCALAPPDATA%\MeetingRoomAutoBooking\w3_credentials.dat`，各区域共用。
+该文件及临时文件被Git忽略，不写入任务配置、不记录到日志、不参与构建和打包。
+换电脑或Windows账号后重新设置；更新密码或删除凭据也在高级设置操作。
+
+## W3备用登录
+
+高级设置可单独保存本机W3账号密码。原有自动登录优先，仅在已核验的
+`https://login.huawei.com` 账号登录页使用备用凭据，一次运行最多自动提交一次密码。
+验证码和二次验证由使用者手动完成。
+
+凭据使用Windows当前用户加密，保存在
+`%LOCALAPPDATA%\MeetingRoomAutoBooking\w3_credentials.dat`，各区域共用。
+该文件及临时文件被Git忽略，不写入任务配置、不记录到日志、不参与构建和打包。
+换电脑或Windows账号后重新设置；更新密码或删除凭据也在高级设置操作。

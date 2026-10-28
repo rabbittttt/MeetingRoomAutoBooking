@@ -37,6 +37,7 @@ from typing import AsyncIterator, Callable, Literal
 from account_auth import AuthorizationError, require_authorized_account
 from booking_profile import PROFILE as DEPLOYMENT_PROFILE
 from date_picker import DatePickerStructureError, select_booking_date
+from w3_login import is_w3_login_url, try_w3_backup_login
 
 from playwright.async_api import (
     BrowserContext, ElementHandle, Locator, Page, Playwright, TimeoutError as PlaywrightTimeout,
@@ -516,7 +517,7 @@ def row_cell_selector(row: int, col: int) -> str:
 class ConciseLogFilter(logging.Filter):
     """界面保留进度和真正异常；磁盘日志不使用此过滤器。"""
     INFO_PREFIXES = (
-        "日志：", "[启动]", "[账号验证]", "[登录] 单页认证成功",
+        "日志：", "[启动]", "[账号验证]", "[登录] 单页认证成功", "[W3备用登录]",
         "[到点抢订]", "[房间未显示]", "[候补] 开始监控", "[候补] 时段完成",
         "[候补] 已达到", "[候补] 所有时段", "[候补] 已停止", "[退出]",
     )
@@ -633,7 +634,7 @@ async def wait_until(moment: datetime) -> None:
         await sleep_or_stop(min(delta, 1.0))
 
 
-async def save_debug(page: Page, tag: str) -> None:
+async def save_debug(page: Page, tag: str, *, mask_inputs: bool = False) -> None:
     # 持续候补/重试时同类异常半小时最多留一张图，避免占满硬盘。
     last = LAST_DEBUG_CAPTURE.get(tag)
     if last is not None and (now_cn() - last).total_seconds() < 1800:
@@ -642,7 +643,9 @@ async def save_debug(page: Page, tag: str) -> None:
     try:
         safe = re.sub(r"[^\w-]", "_", tag)
         file = LOG_DIR / f"{now_cn().strftime('%H%M%S_%f')}_{safe}.png"
-        await page.screenshot(path=str(file), full_page=True, timeout=4500)
+        hide_inputs = mask_inputs or is_w3_login_url(getattr(page, 'url', ''))
+        options = {'mask': [page.locator('input,textarea,[contenteditable="true"]')]} if hide_inputs else {}
+        await page.screenshot(path=str(file), full_page=True, timeout=4500, **options)
         logging.info("已保存排查截图：%s", file)
     except Exception as exc:
         logging.warning("保存截图失败：%s", exc)
@@ -1928,7 +1931,7 @@ async def auth_preflight(page: Page) -> bool:
             if await is_403_page(page):
                 AUTH_BLOCKED.set()
                 logging.error("[登录] 预订页面返回403，停止脚本；请确认账户权限与认证状态")
-                await save_debug(page, "登录403")
+                await save_debug(page, "登录403", mask_inputs=True)
                 return False
             try:
                 if await page.get_by_role("button", name=ADD_ROOM_BUTTON).is_visible():
@@ -1936,15 +1939,16 @@ async def auth_preflight(page: Page) -> bool:
                     return True
             except Exception:
                 pass
+            await try_w3_backup_login(page, stopped=STOP_REQUESTED.is_set)
             await asyncio.sleep(1)
         logging.error("[登录] %s秒内未进入预订表单，可能仍在SSO/二次验证页面", AUTH_WAIT_SECONDS)
-        await save_debug(page, "登录未完成")
+        await save_debug(page, "登录未完成", mask_inputs=True)
         return False
     except StopRequested:
         raise
     except Exception as exc:
         logging.error("[登录] 打开预订页失败：%s", str(exc).splitlines()[0])
-        await save_debug(page, "登录打开失败")
+        await save_debug(page, "登录打开失败", mask_inputs=True)
         return False
 
 
@@ -2007,6 +2011,7 @@ class PagePool:
                 if await button.count() >= 1 and await button.first.is_visible():
                     logging.info("[认证错峰] 工作标签%d：认证完成，可参加并行填表", index)
                     return
+                await try_w3_backup_login(page, stopped=STOP_REQUESTED.is_set)
                 await asyncio.sleep(0.4)
             raise PlaywrightTimeout(f"工作标签{index}认证等待超时：{AUTH_WAIT_SECONDS}秒内未出现添加会议室")
         except StopRequested:
@@ -2022,7 +2027,7 @@ class PagePool:
                 DRIVER_LOST.set()
             logging.error("[认证错峰] 工作标签%d：认证未通过：%s", index, str(exc).splitlines()[0])
             if not DRIVER_LOST.is_set():
-                await save_debug(page, f"工作标签{index}_认证失败")
+                await save_debug(page, f"工作标签{index}_认证失败", mask_inputs=True)
             raise
 
     async def iter_ready(self, needed: int, *, interrupted: Callable[[], bool] | None = None,

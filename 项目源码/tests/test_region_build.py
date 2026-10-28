@@ -27,6 +27,9 @@ from pathlib import Path
 import sys
 import booking_core as core
 import booking_profile
+import build_info
+import w3_credentials
+import w3_login
 gui = importlib.import_module(sys.argv[1])
 snapshot = {
     "deployment_id": core.DEPLOYMENT_ID,
@@ -47,6 +50,9 @@ snapshot = {
     "profile_path": str(Path(booking_profile.__file__).resolve()),
     "gui_path": str(Path(gui.__file__).resolve()),
     "core_hash": gui.CORE_SHA256,
+    "runtime_hashes": build_info.RUNTIME_SHA256,
+    "w3_paths": {module.__name__: str(Path(module.__file__).resolve())
+                 for module in (w3_credentials, w3_login)},
 }
 wrong = copy.deepcopy(gui.DEFAULT_CONFIG)
 wrong["deployment_id"] = "H7" if core.DEPLOYMENT_ID == "F5" else "F5"
@@ -137,6 +143,10 @@ class RegionBuildTests(unittest.TestCase):
                 self.assertEqual(actual["core_tasks"], [[], [], []])
                 self.assertEqual(actual["gui_tasks"], [[], [], []])
                 self.assertEqual(actual["core_hash"], build_exe.sha256(self.source))
+                self.assertEqual(actual["runtime_hashes"], build_exe.runtime_module_hashes(source.parent))
+                self.assertEqual(actual["w3_paths"], {
+                    name: str((source.parent / f"{name}.py").resolve())
+                    for name in ("w3_credentials", "w3_login")})
                 self.assertEqual(Path(actual["core_path"]), source.resolve())
                 self.assertEqual(Path(actual["gui_path"]), gui.resolve())
                 self.assertEqual(Path(actual["profile_path"]), (source.parent / "booking_profile.py").resolve())
@@ -157,6 +167,9 @@ class RegionBuildTests(unittest.TestCase):
                 expected_files = set(build_exe.RUNTIME_MODULES) | {
                     "booking_core.py", "booking_profile.py", "build_info.py", gui.name}
                 self.assertEqual({p.name for p in source.parent.iterdir()}, expected_files)
+                for name in ("w3_credentials.py", "w3_login.py"):
+                    self.assertIn(name, expected_files)
+                    self.assertEqual((source.parent / name).read_bytes(), (ROOT / name).read_bytes())
                 tree = ast.parse((source.parent / "booking_profile.py").read_text(encoding="utf-8"))
                 self.assertEqual(len(tree.body), 1)
                 self.assertEqual(ast.literal_eval(tree.body[0].value), get_profile(profile_id))
@@ -196,6 +209,8 @@ class RegionBuildTests(unittest.TestCase):
             self.assertEqual(output, self.build_root / "dist" / profile_id / f"会议室自动抢订_{profile_id}.exe")
             imports = [command[index + 1] for index, value in enumerate(command) if value == "--hidden-import"]
             self.assertIn("booking_profile", imports)
+            self.assertIn("w3_credentials", imports)
+            self.assertIn("w3_login", imports)
             self.assertNotIn("deployment_profiles", imports)
             self.assertNotIn("license_admin", imports)
         self.assertEqual(len(set(outputs.values())), 3)

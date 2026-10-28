@@ -12,6 +12,10 @@ admin_private_key.pem
 .env
 .env.*
 credentials.json
+# W3备用登录密文及写入中间文件；不得强制加入Git或打包。
+w3_credentials.dat
+w3_credentials.dat.*
+W3登录凭据*
 token.json
 chrome_profile/
 browser_profile/

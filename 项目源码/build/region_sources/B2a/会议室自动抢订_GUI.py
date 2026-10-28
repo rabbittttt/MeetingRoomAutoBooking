@@ -21,6 +21,7 @@ from tkinter import messagebox, ttk
 from tkinter import font as tkfont
 
 import booking_core as core
+import w3_credentials
 from window_chrome import BorderlessWindow as WindowsWindowFrame
 
 try:
@@ -45,6 +46,7 @@ MODE_LABELS = {v: k for k, v in MODE_OPTIONS.items()}
 AREAS = tuple(core.AREA_ROOM_ROWS)
 WEEKDAYS = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
 TIME_SLOTS = tuple(f"{h:02d}:{m:02d}" for h in range(9, 24) for m in (0, 30))
+W3_LOGIN_ORIGIN = "https://login.huawei.com"
 
 # 嫩粉少女风：背景更轻、更偏粉；主色降低灰度，文字保持深色以保证清晰度。
 BG = "#FFF7FA"
@@ -400,9 +402,96 @@ class WindowControlButton(RoundedActionButton):
             self.create_line(16, 20, 26, 10, fill=TEXT, width=1.4)
 
 
+class W3CredentialsDialog:
+    """只在本机收集备用登录资料，不把密码放入业务配置或日志。"""
+    def __init__(self, app, username=""):
+        self.app = app
+        self.top = tk.Toplevel(app.root)
+        self.top.title("W3备用登录设置")
+        self.top.configure(bg=BG)
+        self.top.resizable(False, False)
+        self.top.transient(app.root)
+        self.username_var = tk.StringVar(master=self.top, value=username)
+        # 每次编辑均重新输入，不将已保存的密码放入控件。
+        self.password_var = tk.StringVar(master=self.top, value="")
+        self.feedback_var = tk.StringVar(master=self.top, value="")
+        self.top.protocol("WM_DELETE_WINDOW", self.close)
+        self.top.bind("<Escape>", self.close)
+        self.top.bind("<Return>", self.save)
+        self.top.bind("<Destroy>", self._on_destroy, add="+")
+        surface = RoundedSurface(self.top, pad_x=16, pad_y=12)
+        surface.pack(fill="both", expand=True, padx=10, pady=10)
+        body = surface.inner
+        ttk.Label(body, text="W3备用登录", style="Section.TLabel").pack(anchor="w")
+        ttk.Label(body, text="先复用浏览器自动登录；出现登录页时才尝试一次。\n验证码或二次验证仍需手动完成。",
+                  style="CardMuted.TLabel", wraplength=440).pack(anchor="w", pady=(6, 10))
+        for label, variable, masked in (("公司账号", self.username_var, False),
+                                         ("密码（每次修改需重新输入）", self.password_var, True)):
+            ttk.Label(body, text=label, style="Card.TLabel").pack(anchor="w", pady=(4, 3))
+            entry = ttk.Entry(body, textvariable=variable, width=48, show="*" if masked else "")
+            entry.pack(fill="x", pady=(0, 5))
+            if not masked:
+                self.username_entry = entry
+            else:
+                self.password_entry = entry
+        ttk.Label(body, text="登录域名（固定）", style="Card.TLabel").pack(anchor="w", pady=(4, 3))
+        self.origin_entry = ttk.Entry(body, width=48)
+        self.origin_entry.insert(0, W3_LOGIN_ORIGIN)
+        self.origin_entry.configure(state="readonly")
+        self.origin_entry.pack(fill="x")
+        ttk.Label(body, text="使用当前 Windows 账号加密，仅保存在本机；各区域共用。\n请只在此窗口输入密码，不要发到聊天中。",
+                  style="CardMuted.TLabel", wraplength=440).pack(anchor="w", pady=(10, 3))
+        ttk.Label(body, textvariable=self.feedback_var, style="Card.TLabel",
+                  foreground=ACCENT_TEXT, wraplength=440).pack(anchor="w", pady=(3, 6))
+        actions = ttk.Frame(body, style="Card.TFrame")
+        actions.pack(fill="x")
+        RoundedActionButton(actions, text="取消", command=self.close, width=90).pack(side="right")
+        RoundedActionButton(actions, text="保存到本机", command=self.save, variant="primary",
+                            width=115).pack(side="right", padx=(0, 8))
+        self.top.update_idletasks()
+        self.top.grab_set()
+        self.username_entry.focus_set()
+
+    def _on_destroy(self, event):
+        if event.widget is self.top:
+            self.password_var.set("")
+            self.app._w3_dialog = None
+
+    def close(self, event=None):
+        self.password_var.set("")
+        self.app._w3_dialog = None
+        self.top.destroy()
+        return "break"
+
+    def save(self, event=None):
+        password = self.password_var.get()
+        try:
+            if self.app.is_running():
+                self.feedback_var.set("任务正在运行，请停止任务后再修改备用登录。")
+                return "break"
+            username = self.username_var.get().strip()
+            if not username or not password:
+                self.feedback_var.set("请输入公司账号和密码；修改时需要重新输入密码。")
+                return "break"
+            w3_credentials.save_credentials(username, password, W3_LOGIN_ORIGIN)
+        except (w3_credentials.CredentialError, OSError, ValueError):
+            # 不回显异常文本，防止底层异常包含用户输入。
+            self.feedback_var.set("保存失败，请检查账号格式及本机存储权限，重新输入密码后重试。")
+            return "break"
+        finally:
+            self.password_var.set("")
+            password = ""
+        self.app._refresh_w3_credentials_status()
+        self.close()
+        messagebox.showinfo("W3备用登录", "已加密保存到本机，下次启动任务时生效。", parent=self.app.root)
+        return "break"
+
+
 class BookingGUI:
-    def __init__(self, root: tk.Tk, *, config_override: dict | None = None):
+    def __init__(self, root: tk.Tk, *, config_override: dict | None = None,
+                 check_credentials: bool = True):
         self.root = root
+        self._check_credentials = check_credentials
         root.title("会议室自动抢订")
         # 使用 Tk 的逻辑像素，尊重 Windows 125% / 150% DPI 缩放。
         # 16 寸笔记本优先约 1160×750，窄屏和低分屏使用滚动区域。
@@ -419,6 +508,7 @@ class BookingGUI:
         self.worker_loop: asyncio.AbstractEventLoop | None = None
         self.stop_event = threading.Event()
         self.close_after_stop = False
+        self._w3_dialog = None
         self.rooms: dict[tuple[str, str], tk.BooleanVar] = {}
         self.release_data: dict[str, dict] = {}
         self.watch_data: dict[str, dict] = {}
@@ -1080,6 +1170,27 @@ class BookingGUI:
             self.setting_vars[key] = variable
             field, _ = self._label_entry(grid, text, variable, 22)
             field.grid(row=0, column=i, sticky="w", padx=(0, 18))
+        login_card = self.card(tab, "W3备用登录", "优先复用自动登录；登录页尝试一次，验证码或二次验证需手动完成。")
+        login_actions = ttk.Frame(login_card, style="Card.TFrame")
+        login_actions.pack(fill="x")
+        self.w3_status_var = tk.StringVar(value="未设置")
+        ttk.Label(login_actions, textvariable=self.w3_status_var, style="Card.TLabel").pack(side="left")
+        self.w3_clear_button = RoundedActionButton(login_actions, text="清除本机凭据",
+                                                   command=self.clear_w3_credentials, width=115)
+        self.w3_clear_button.pack(side="right")
+        self.w3_settings_button = RoundedActionButton(login_actions, text="设置备用登录",
+                                                      command=self.open_w3_credentials, width=115)
+        self.w3_settings_button.pack(side="right", padx=(0, 8))
+        try:
+            credential_location = str(w3_credentials.credential_path())
+        except w3_credentials.CredentialError:
+            credential_location = "暂不可用，请检查 Windows 用户环境"
+        ttk.Label(login_card, text=f"当前 Windows 账号加密保存 · 各区域共用：{credential_location}",
+                  style="CardMuted.TLabel", wraplength=920).pack(anchor="w", pady=(3, 0))
+        if self._check_credentials:
+            self._refresh_w3_credentials_status()
+        else:
+            self.w3_status_var.set("构建自检：不读取本机凭据")
         logging_card = self.card(tab, "日志和诊断")
         ChoiceChip(logging_card, text="显示详细网页日志", variable=self.verbose_var,
                    width=166).pack(anchor="w")
@@ -1092,6 +1203,56 @@ class BookingGUI:
             ttk.Label(paths, text=txt, style="CardMuted.TLabel", wraplength=920).pack(anchor="w", pady=(2, 7))
         ttk.Label(paths, text="本机登录信息仅保存在当前用户账户。不要把 Chrome 登录数据、个人配置和日志发给其他人。",
                   style="CardMuted.TLabel").pack(anchor="w", pady=(6, 0))
+
+    def _refresh_w3_credentials_status(self):
+        try:
+            credentials = w3_credentials.load_credentials()
+            if credentials is None:
+                text = "未设置"
+            elif credentials.login_origin != W3_LOGIN_ORIGIN:
+                text = "登录域名不符，请重新设置"
+            else:
+                text = "已设置 · 本机加密保存"
+        except (w3_credentials.CredentialError, OSError, ValueError):
+            text = "无法读取，请重新设置或清除"
+        self.w3_status_var.set(text)
+
+    def _set_w3_controls_running(self, running):
+        state = "disabled" if running else "normal"
+        self.w3_settings_button.configure(state=state)
+        self.w3_clear_button.configure(state=state)
+
+    def open_w3_credentials(self):
+        if self.is_running():
+            messagebox.showinfo("任务正在运行", "请停止任务后再修改备用登录。", parent=self.root)
+            return
+        if self._w3_dialog is not None:
+            self._w3_dialog.top.lift()
+            return
+        username = ""
+        try:
+            credentials = w3_credentials.load_credentials()
+            if credentials is not None and credentials.login_origin == W3_LOGIN_ORIGIN:
+                username = credentials.username
+        except (w3_credentials.CredentialError, OSError, ValueError):
+            pass
+        self._w3_dialog = W3CredentialsDialog(self, username)
+
+    def clear_w3_credentials(self):
+        if self.is_running():
+            messagebox.showinfo("任务正在运行", "请停止任务后再清除备用登录。", parent=self.root)
+            return
+        if not messagebox.askyesno("清除W3备用登录", "清除本机保存的备用登录账号和密码？\n浏览器已有的登录状态不会删除。", parent=self.root):
+            return
+        if self.is_running():
+            return
+        try:
+            w3_credentials.delete_credentials()
+        except (w3_credentials.CredentialError, OSError, ValueError):
+            messagebox.showerror("清除失败", "无法清除本机凭据，请检查文件权限后重试。", parent=self.root)
+            return
+        self._refresh_w3_credentials_status()
+        messagebox.showinfo("W3备用登录", "已清除本机备用登录凭据。", parent=self.root)
 
     def set_config(self, cfg):
         self.mode_var.set(MODE_LABELS.get(cfg.get("mode", "both"), MODE_LABELS["both"]))
@@ -1276,6 +1437,7 @@ class BookingGUI:
         self.worker_loop = None
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
+        self._set_w3_controls_running(True)
         self.status_var.set("运行中 · 模拟" if cfg["dry_run"] else "运行中 · 正式")
         self.append_log(startup_summary(cfg), 0)
         self.thread = threading.Thread(target=self._run_worker, args=(mode,), daemon=True, name="meeting-booker")
@@ -1327,6 +1489,7 @@ class BookingGUI:
                     self.status_var.set("已停止 / 已完成")
                     self.start_button.configure(state="normal")
                     self.stop_button.configure(state="disabled")
+                    self._set_w3_controls_running(False)
                     self.append_log("本次任务已结束。", 0)
                     if self.close_after_stop:
                         self.root.destroy()
@@ -1479,15 +1642,12 @@ def run_window_drag_self_test(app):
 
 
 def run_self_test(marker: Path):
-    # 仅验证配套签名及加密依赖是否进入程序，不授予当前Windows用户使用权。
-    # 正常入口、开始按钮和核心入口仍各自执行OS账号门禁。
+    """构建时验证内嵌依赖、GUI与核心参数；授权文件由管理员另外分发。"""
+    # 构建自检不读取外置授权文件。正常入口、开始按钮和核心入口仍核验账号。
+    from base64 import b64decode
     import account_auth
-    raw = (account_auth.application_directory() / account_auth.LICENSE_FILENAME).read_bytes()
-    assert 0 < len(raw) <= account_auth.MAX_LICENSE_BYTES, "配套授权文件大小异常"
-    document = json.loads(raw.decode("utf-8"))
-    first_account = document["payload"]["accounts"][0]
-    assert account_auth.verify_document(document, first_account) == first_account, "配套授权验签失败"
-    """Windows 打包后做真实GUI与核心参数一致性自检，不进入公司网络。"""
+    from account_public_key import PUBLIC_KEY_BASE64
+    account_auth.Ed25519PublicKey.from_public_bytes(b64decode(PUBLIC_KEY_BASE64, validate=True))
     test_config = copy.deepcopy(DEFAULT_CONFIG)
     test_config["rooms"] = {area: [next(iter(room_map))]
                             for area, room_map in core.AREA_ROOM_ROWS.items()}
@@ -1504,7 +1664,7 @@ def run_self_test(marker: Path):
                         "stop_at_meeting_start": False})
     root = tk.Tk()
     root.withdraw()
-    app = BookingGUI(root, config_override=test_config)
+    app = BookingGUI(root, config_override=test_config, check_credentials=False)
     root.update_idletasks()
     # 保证四个标签的文字字号和导航占位尺寸切换前后相同。
     nav_before = {k: (button.title, button.winfo_reqwidth(), button.winfo_reqheight())

@@ -99,7 +99,36 @@ class BuildAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.source_license.read_bytes(), OLD_LICENSE)
         self.assertEqual(self.output_license.read_bytes(), NEW_LICENSE)
 
-    def fake_archive(self, stage, gui, *, tamper_module=None):
+    def test_build_does_not_read_or_copy_local_w3_credentials(self):
+        credentials = self.root / "w3_credentials.dat"
+        sentinel = b"synthetic-encrypted-data-not-a-real-credential"
+        credentials.write_bytes(sentinel)
+        original_open = Path.open
+
+        def guarded_open(path, *args, **kwargs):
+            if path.name.casefold() == "w3_credentials.dat":
+                raise AssertionError("构建不得读取本机凭据文件")
+            return original_open(path, *args, **kwargs)
+
+        with patch.object(Path, "open", guarded_open):
+            self.run_build()
+        self.assertEqual(credentials.read_bytes(), sentinel)
+        self.assertFalse((self.output.parent / credentials.name).exists())
+        self.assertFalse((self.root / "build" / "region_sources" / "H7" / credentials.name).exists())
+
+    def test_build_rejects_explicit_credentials_data_file_or_parent_directory(self):
+        folder = self.root / "local_data"
+        folder.mkdir()
+        credentials = folder / "W3_CREDENTIALS.DAT"
+        credentials.write_bytes(b"synthetic-encrypted-data")
+        for source in (credentials, folder):
+            with self.subTest(source=source.name):
+                settings = dict(build_exe.DEFAULTS, profile_id="H7",
+                                data_files=[{"source": str(source), "dest": "."}])
+                with self.assertRaisesRegex(ValueError, "W3 本机凭据"):
+                    build_exe.build_command(Path(sys.executable), settings, self.gui, self.source)
+
+    def fake_archive(self, stage, gui, *, tamper_module=None, credential_file=None):
         payloads = {
             name: compile((stage / f"{name}.py").read_text(encoding="utf-8"),
                           f"embedded/{name}.py", "exec", dont_inherit=True)
@@ -111,6 +140,7 @@ class BuildAuthorizationTests(unittest.TestCase):
                            dont_inherit=True)
         pyz = types.SimpleNamespace(toc=dict.fromkeys(payloads), extract=payloads.__getitem__)
         archive = types.SimpleNamespace(
+            toc={f"local_data/{credential_file}": None} if credential_file else {},
             open_embedded_archive=Mock(return_value=pyz),
             extract=Mock(return_value=marshal.dumps(gui_code)))
         reader = Mock(return_value=archive)
@@ -127,13 +157,14 @@ class BuildAuthorizationTests(unittest.TestCase):
                    "PyInstaller.archive.readers": readers}
         return modules, reader, archive
 
-    def verify(self, *, tamper_module=None):
+    def verify(self, *, tamper_module=None, credential_file=None):
         settings = dict(build_exe.DEFAULTS, profile_id="H7")
         source, gui = build_exe.prepare_build_sources(
             settings, self.source, self.gui, get_profile("H7"))
         self.output.parent.mkdir(parents=True, exist_ok=True)
         self.output.write_bytes(b"MZ-local-test-output")
-        modules, reader, archive = self.fake_archive(source.parent, gui, tamper_module=tamper_module)
+        modules, reader, archive = self.fake_archive(
+            source.parent, gui, tamper_module=tamper_module, credential_file=credential_file)
         with patch.dict(sys.modules, modules):
             report = verify_embedded.verify_build(self.output, source.parent, gui, "H7")
         reader.assert_called_once_with(str(self.output.resolve()))
@@ -141,6 +172,10 @@ class BuildAuthorizationTests(unittest.TestCase):
         archive.extract.assert_called_once_with(gui.stem)
         self.assertTrue(report["successful"])
         self.assertTrue(report["authorization_managed_separately"])
+        self.assertTrue(report["w3_credentials_file_absent"])
+        self.assertEqual(report["runtime_sha256"], build_exe.runtime_module_hashes(source.parent))
+        self.assertIn("w3_credentials", report["embedded_modules_match"])
+        self.assertIn("w3_login", report["embedded_modules_match"])
         self.assertNotIn("external_license_matches", report)
         self.assertEqual(set(report["embedded_modules_match"]),
                          set(verify_embedded.RUNTIME_MODULES) | {gui.stem})
@@ -168,6 +203,40 @@ class BuildAuthorizationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "嵌入模块.*不一致.*account_auth"):
             self.verify(tamper_module="account_auth")
         self.assertFalse(report_path.exists(), "核验失败不能残留旧的通过报告")
+
+    def test_embedded_verification_rejects_changed_w3_modules(self):
+        for name in ("w3_credentials", "w3_login"):
+            with self.subTest(module=name):
+                with self.assertRaisesRegex(ValueError, "嵌入模块.*不一致.*" + name):
+                    self.verify(tamper_module=name)
+
+    def test_embedded_verification_rejects_stale_runtime_hash(self):
+        source, gui = build_exe.prepare_build_sources(
+            dict(build_exe.DEFAULTS, profile_id="H7"), self.source, self.gui, get_profile("H7"))
+        (source.parent / "w3_login.py").write_text("CHANGED_AFTER_STAGING = True\n", encoding="utf-8")
+        self.output.parent.mkdir(parents=True, exist_ok=True)
+        self.output.write_bytes(b"MZ-local-test-output")
+        with self.assertRaisesRegex(ValueError, "运行模块 SHA256"):
+            verify_embedded.verify_build(self.output, source.parent, gui, "H7")
+
+    def test_embedded_verification_rejects_packaged_w3_credentials_without_reading_them(self):
+        with self.assertRaisesRegex(ValueError, "W3 本机凭据文件"):
+            self.verify(credential_file="w3_credentials.dat")
+
+    def test_build_and_verification_reject_credential_temporary_and_backup_files(self):
+        for filename in ("w3_credentials.dat.tmp", "W3_CREDENTIALS.DAT.backup"):
+            with self.subTest(filename=filename):
+                folder = self.root / filename.rsplit(".", 1)[-1]
+                folder.mkdir()
+                credentials = folder / filename
+                credentials.write_bytes(b"synthetic-encrypted-data")
+                for source in (credentials, folder):
+                    settings = dict(build_exe.DEFAULTS, profile_id="H7",
+                                    data_files=[{"source": str(source), "dest": "."}])
+                    with self.assertRaisesRegex(ValueError, "W3 本机凭据"):
+                        build_exe.build_command(Path(sys.executable), settings, self.gui, self.source)
+                with self.assertRaisesRegex(ValueError, "W3 本机凭据文件"):
+                    self.verify(credential_file=filename)
 
 
 if __name__ == "__main__":

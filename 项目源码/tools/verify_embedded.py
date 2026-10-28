@@ -19,8 +19,10 @@ from deployment_profiles import PROFILES, get_profile
 
 RUNTIME_MODULES = (
     "booking_core", "booking_profile", "account_auth", "account_public_key",
-    "gui_diagnostics", "window_chrome", "date_picker", "build_info",
+    "gui_diagnostics", "window_chrome", "date_picker", "w3_credentials", "w3_login", "build_info",
 )
+HASHED_RUNTIME_MODULES = tuple(name for name in RUNTIME_MODULES
+                               if name not in {"booking_core", "booking_profile", "build_info"})
 FORBIDDEN_MODULES = ("license_admin", "deployment_profiles")
 
 
@@ -80,19 +82,26 @@ def verify_build(exe: Path, stage: Path, gui: Path, profile_id: str) -> dict:
             raise ValueError(f"待校验文件不是有效 Windows EXE：{exe}")
     core_hash = digest(stage / "booking_core.py")
     profile_hash = digest(stage / "booking_profile.py")
+    runtime_hashes = {name: digest(stage / f"{name}.py") for name in HASHED_RUNTIME_MODULES}
     info = literal_assignments(stage / "build_info.py", {
-        "CORE_SHA256", "DEPLOYMENT_ID", "PROFILE_SHA256",
+        "CORE_SHA256", "DEPLOYMENT_ID", "PROFILE_SHA256", "RUNTIME_SHA256",
     })
     profile = literal_assignments(stage / "booking_profile.py", {"PROFILE"})["PROFILE"]
     if not isinstance(profile, dict) or profile.get("id") != profile_id or info["DEPLOYMENT_ID"] != profile_id:
         raise ValueError("暂存配置或构建信息的部署区域与本次请求不一致")
     if info["CORE_SHA256"] != core_hash or info["PROFILE_SHA256"] != profile_hash:
         raise ValueError("暂存构建信息的源码/区域配置 SHA256 与实际文件不一致")
+    if info["RUNTIME_SHA256"] != runtime_hashes:
+        raise ValueError("暂存构建信息的运行模块 SHA256 与实际文件不一致")
 
     # 使用调用者选择的打包解释器执行 CLI；普通导入本工具不要求已安装 PyInstaller。
     from PyInstaller.archive.readers import CArchiveReader
 
     archive = CArchiveReader(str(exe))
+    archived_names = (str(name).replace("\\", "/").rsplit("/", 1)[-1].casefold() for name in archive.toc)
+    if any(name == "w3_credentials.dat" or name.startswith("w3_credentials.dat.")
+           for name in archived_names):
+        raise ValueError("EXE 意外包含 W3 本机凭据文件，禁止分发")
     pyz = archive.open_embedded_archive("PYZ.pyz")
     forbidden = [name for name in pyz.toc if any(
         name == module or name.startswith(module + ".") for module in FORBIDDEN_MODULES)]
@@ -118,6 +127,7 @@ def verify_build(exe: Path, stage: Path, gui: Path, profile_id: str) -> dict:
         deployment_profiles_module_absent=True, authorization_managed_separately=True,
         exe=str(exe), stage=str(stage), exe_bytes=exe.stat().st_size,
         core_sha256=core_hash, profile_sha256=profile_hash, exe_sha256=digest(exe),
+        runtime_sha256=runtime_hashes, w3_credentials_file_absent=True,
     )
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
