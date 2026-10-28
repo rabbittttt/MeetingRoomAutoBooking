@@ -20,9 +20,35 @@ token.json
 chrome_profile/
 browser_profile/
 
-# Python临时缓存；现有构建产物按项目备份要求保留。
+# 构建缓存、区域暂存源码与程序输出；本机保留，由使用者自行打包。
+build/
+dist/
+*.exe
+/项目源码/build_info.py
+打包日志/
+构建校验.json
+启动自检结果.txt
+
+# 自动生成的测试报告和运行日志；保留测试源码、配置及网页结构参考资料。
+*.log
+logs/
+/项目源码/*回归范围.json
+/项目源码/验证记录.txt
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Python临时缓存、虚拟环境及本机IDE设置。
 __pycache__/
 *.py[cod]
 .pytest_cache/
-# 保留既有PyInstaller构建快照中的启动模块。
-!项目源码/build/**/localpycs/*.pyc
+.mypy_cache/
+.ruff_cache/
+.packaging_env/
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+*.iml

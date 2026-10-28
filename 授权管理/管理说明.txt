@@ -3,6 +3,10 @@
 固定目录
 D:\05 AI脚本\PythonProject\网页操作\MeetingRoomAutoBooking\授权管理
 预约源码位于同级“项目源码”目录，沿用现有签名密钥，不需要重新生成。
+Git不再跟踪管理员EXE，本机已有EXE可继续使用。新拉取的工程可用源码打开同一管理窗口：
+安装Python及cryptography依赖后，在项目根目录运行下面一整行，显式使用本目录的原有私钥和名单：
+python .\项目源码\license_admin.py --key .\授权管理\admin_private_key.pem --accounts-file .\授权管理\accounts.txt --output .\授权管理\账号授权.json
+私钥和已有名单需由管理员单独放入本目录，不能从Git获取；不要生成新密钥替换原有密钥。
 
 增加或删除账号
 1. 双击“账号授权管理.exe”。
