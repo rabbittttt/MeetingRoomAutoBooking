@@ -154,13 +154,33 @@ class W3LoginBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.loader.assert_not_called()
         await self.assert_empty()
 
-    async def test_existing_manual_input_is_preserved(self):
-        await self.open_login()
-        await self.page.get_by_placeholder('W3账号', exact=True).fill('manual_fixture')
-        self.assertEqual(await self.login.maybe_login(self.page), 'manual')
-        self.loader.assert_not_called()
-        self.assertEqual(await self.page.get_by_placeholder('W3账号', exact=True).input_value(), 'manual_fixture')
-        self.assertEqual(await self.page.evaluate('window.loginClicks'), 0)
+    async def test_prefilled_fields_are_replaced_with_saved_credentials_once(self):
+        for old_user, old_password in (('old_fixture', ''), ('', 'old_fixture_password'),
+                                       ('old_fixture', 'old_fixture_password')):
+            with self.subTest(username_present=bool(old_user), password_present=bool(old_password)):
+                await self.open_login()
+                self.loader.reset_mock()
+                self.login = w3_login.W3LoginFallback(credentials_loader=self.loader, grace_seconds=0)
+                await self.page.get_by_placeholder('W3账号', exact=True).fill(old_user)
+                await self.page.get_by_placeholder('密码', exact=True).fill(old_password)
+                await self.page.evaluate('''() => {
+                    const account = document.querySelector('input[placeholder="W3账号"]');
+                    const password = document.querySelector('input[type="password"]');
+                    account.addEventListener('input', () => window.passwordDuringAccountChange = password.value);
+                    document.querySelector('form').addEventListener('submit', () => {
+                        window.submittedCredentials = [account.value, password.value];
+                    });
+                }''')
+                with self.assertLogs(level='INFO') as logs:
+                    self.assertEqual(await self.login.maybe_login(self.page), 'submitted')
+                self.assertEqual(await self.page.evaluate('window.passwordDuringAccountChange'), '')
+                self.assertEqual(await self.page.evaluate('window.submittedCredentials'),
+                                 [DUMMY.username, DUMMY.password])
+                self.assertNotIn(DUMMY.username, '\n'.join(logs.output))
+                self.assertNotIn(DUMMY.password, '\n'.join(logs.output))
+                self.assertEqual(await self.login.maybe_login(self.page), 'skipped')
+                self.assertEqual(await self.page.evaluate('window.loginClicks'), 1)
+                self.loader.assert_called_once_with()
 
     async def test_visible_challenge_requires_manual_login(self):
         await self.open_login(extra='<label>验证码<input name="captcha"></label>')
@@ -171,9 +191,35 @@ class W3LoginBrowserTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_credentials_keeps_manual_login_available(self):
         self.loader.return_value = None
         await self.open_login()
+        await self.page.get_by_placeholder('W3账号', exact=True).fill('old_fixture')
+        await self.page.get_by_placeholder('密码', exact=True).fill('old_fixture_password')
         self.assertEqual(await self.login.maybe_login(self.page), 'manual')
         self.assertEqual(await self.login.maybe_login(self.page), 'skipped')
-        await self.assert_empty()
+        self.assertEqual(await self.page.get_by_placeholder('W3账号', exact=True).input_value(), 'old_fixture')
+        self.assertEqual(await self.page.get_by_placeholder('密码', exact=True).input_value(), 'old_fixture_password')
+        self.assertEqual(await self.page.evaluate('window.loginClicks'), 0)
+
+    async def test_stop_after_clearing_old_password_does_not_fill_saved_credentials(self):
+        await self.open_login()
+        await self.page.get_by_placeholder('W3账号', exact=True).fill('old_fixture')
+        await self.page.get_by_placeholder('密码', exact=True).fill('old_fixture_password')
+        from playwright.async_api import Locator
+        original = Locator.fill
+        stopped = False
+
+        async def fill(locator, value, **kwargs):
+            nonlocal stopped
+            await original(locator, value, **kwargs)
+            if value == '':
+                stopped = True
+
+        with patch.object(Locator, 'fill', fill):
+            self.assertEqual(await self.login.maybe_login(self.page, stopped=lambda: stopped), 'skipped')
+        self.assertEqual(await self.page.get_by_placeholder('W3账号', exact=True).input_value(), 'old_fixture')
+        self.assertEqual(await self.page.get_by_placeholder('密码', exact=True).input_value(), '')
+        self.assertEqual(await self.page.evaluate('window.loginClicks'), 0)
+        self.assertTrue(self.login.attempted)
+        self.assertEqual(await self.login.maybe_login(self.page), 'skipped')
 
     async def test_corrupt_credentials_are_not_exposed_in_logs(self):
         self.loader.side_effect = CredentialError(DUMMY.password)

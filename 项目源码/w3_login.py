@@ -107,10 +107,6 @@ class W3LoginFallback:
                 if _CHALLENGE_TEXT.search(await page.locator('body').inner_text(timeout=CONTROL_TIMEOUT_MS)):
                     self._notice('challenge', '页面要求验证码或额外验证，请在浏览器手动完成。')
                     return 'manual'
-                # 不覆盖用户正在输入的内容，也不替浏览器已填好的密码擅自提交。
-                if await username.input_value() or await password.input_value():
-                    self._notice('manual', '检测到登录框已有内容，请在浏览器完成登录。')
-                    return 'manual'
                 credentials = self._load()
                 if credentials is None:
                     self.disabled = True
@@ -129,6 +125,10 @@ class W3LoginFallback:
                     return 'skipped'
                 # 即使控件重绘/提交失败也不再自动尝试，避免错误密码反复触发锁定。
                 self.attempted = True
+                # 使用已保存的凭据覆盖预填内容；先清旧密码，fill会替换原账号。
+                await password.fill('', timeout=CONTROL_TIMEOUT_MS)
+                if stopped() or not is_w3_login_url(page.url):
+                    return 'skipped'
                 await username.fill(credentials.username, timeout=CONTROL_TIMEOUT_MS)
                 if stopped() or not is_w3_login_url(page.url):
                     return 'skipped'
