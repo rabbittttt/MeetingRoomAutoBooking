@@ -142,6 +142,40 @@ class W3CredentialsGUIActionsTests(unittest.TestCase):
 
 
 class W3CredentialsGUIWidgetTests(unittest.TestCase):
+    def test_save_and_cancel_buttons_can_destroy_their_dialog_without_focus_errors(self):
+        root = gui.tk.Tk()
+        root.withdraw()
+        self.addCleanup(root.destroy)
+
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+
+        with patch.object(gui.w3_credentials, "load_credentials", return_value=None), \
+                patch.object(gui.w3_credentials, "credential_path", return_value=Path("C:/temporary/w3_credentials.dat")), \
+                patch.object(gui.w3_credentials, "save_credentials") as save, \
+                patch.object(gui.messagebox, "showinfo") as info:
+            app = gui.BookingGUI(root, config_override=copy.deepcopy(gui.DEFAULT_CONFIG), check_credentials=False)
+            before = app.get_config()
+            for caption in ("保存到本机", "取消"):
+                with self.subTest(button=caption):
+                    app.open_w3_credentials()
+                    dialog = app._w3_dialog
+                    dialog.username_var.set("fixture_user")
+                    dialog.password_var.set("fictional-test-password")
+                    button = next(w for w in descendants(dialog.top)
+                                  if isinstance(w, gui.RoundedActionButton) and w.title == caption)
+                    # 调用鼠标/键盘共用的真实按钮回调；直接调用dialog.save/close无法覆盖此错误。
+                    self.assertEqual(button._click(), "break")
+                    root.update_idletasks()
+                    self.assertFalse(dialog.top.winfo_exists())
+                    self.assertEqual(dialog.password_var.get(), "")
+                    self.assertIsNone(app._w3_dialog)
+                    self.assertEqual(app.get_config(), before)
+            save.assert_called_once_with("fixture_user", "fictional-test-password", gui.W3_LOGIN_ORIGIN)
+            info.assert_called_once()
+
     def test_build_self_test_never_reads_or_changes_local_credentials(self):
         # 独立进程隔离自检对核心参数的修改；真实窗口拖动已有专门回归。
         script = '''

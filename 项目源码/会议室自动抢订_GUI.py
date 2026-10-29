@@ -231,9 +231,10 @@ class RoundedActionButton(tk.Canvas):
     config = configure
 
     def _click(self, _=None):
+        # 命令可能关闭所属窗口，必须在执行命令前聚焦，之后不再访问控件。
+        self.focus_set()
         if self.is_enabled and self.command:
             self.command()
-        self.focus_set()
         return "break"
 
     def _hover(self, is_hover):
