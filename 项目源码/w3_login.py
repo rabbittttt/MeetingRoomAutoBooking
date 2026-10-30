@@ -95,7 +95,8 @@ class W3LoginFallback:
                 button = await _unique_visible(page.get_by_role('button', name=_LOGIN_TEXT))
                 if button is None:
                     button = await _unique_visible(page.get_by_text(_LOGIN_TEXT, exact=True))
-                if button is None or not await button.is_enabled():
+                # 登录按钮可能在填完整账号密码后才启用，不能在填写前要求可点击。
+                if button is None:
                     return 'skipped'
                 password_element = await password.element_handle()
                 if (not await username.evaluate('(e, p) => e.form === p.form', password_element)
@@ -137,6 +138,7 @@ class W3LoginFallback:
                         or not await _trusted_actions(username, password, button)):
                     await password.fill('', timeout=CONTROL_TIMEOUT_MS)
                     return 'skipped'
+                logging.info('[W3备用登录] 已填写保存的账号密码，等待登录按钮可用。')
                 await button.click(timeout=CONTROL_TIMEOUT_MS)
                 logging.info('[W3备用登录] 已填写并提交一次登录，等待认证；本次运行不重复提交密码。')
                 return 'submitted'

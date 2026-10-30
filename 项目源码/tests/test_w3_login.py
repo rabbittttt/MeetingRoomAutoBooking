@@ -84,6 +84,23 @@ class W3LoginBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.login.maybe_login(self.page), 'skipped')
         self.loader.assert_not_called()
 
+    async def test_login_button_enabled_only_after_filling_credentials_is_submitted(self):
+        await self.open_login()
+        await self.page.evaluate('''() => {
+            const form = document.querySelector('form');
+            const button = form.querySelector('button');
+            button.disabled = true;
+            form.addEventListener('input', () => {
+                button.disabled = ![...form.querySelectorAll('input')].every(e => e.value);
+            });
+        }''')
+        self.assertEqual(await self.login.maybe_login(self.page), 'submitted')
+        self.loader.assert_called_once_with()
+        self.assertEqual(await self.page.evaluate('window.loginClicks'), 1)
+        self.assertEqual(await self.page.get_by_placeholder('W3账号', exact=True).input_value(), DUMMY.username)
+        self.assertEqual(await self.page.get_by_placeholder('密码', exact=True).input_value(), DUMMY.password)
+        self.assertEqual(await self.login.maybe_login(self.page), 'skipped')
+
     async def test_failed_login_does_not_loop_or_repeat_after_reload(self):
         await self.open_login()
         await self.login.maybe_login(self.page)

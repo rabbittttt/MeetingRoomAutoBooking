@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import AsyncIterator, Callable, Literal
+from urllib.parse import urlsplit
 
 from account_auth import AuthorizationError, require_authorized_account
 from booking_profile import PROFILE as DEPLOYMENT_PROFILE
@@ -1695,39 +1696,14 @@ async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col
         raise SelectorConfigurationError("无法唯一确定当前选房弹窗，拒绝时间格子点击")
     result = await panels.evaluate_handle(r"""(panel, args) => {
         const {startCol,endCol,roomName,fullNamePattern,shortNamePattern,expectedNames}=args;
-        const fullNameRx=new RegExp(fullNamePattern,'i');
-        // 房名和格子在同一次DOM读取中取坐标，避免自动滚动/重绘发生在两次读取之间。
-        const rooms=[],seen=new Set();
-        const content=panel.querySelector('.ev_Dialog_PanelContent')||panel;
-        for(const e of content.querySelectorAll('*')) {
-            if(e.children.length) continue;
-            const r=e.getBoundingClientRect();
-            if(!r.width||!r.height||getComputedStyle(e).visibility==='hidden') continue;
-            const m=(e.textContent||'').trim().match(fullNameRx);
-            if(!m) continue;
-            const name=m[0].replace(/[-_]+$/,''),key=name+'@'+Math.round(r.y);
-            if(seen.has(key)) continue;
-            seen.add(key); rooms.push({name,r});
-        }
-        rooms.sort((a,b)=>a.r.y-b.r.y||a.r.x-b.r.x);
-        if(!rooms.length) return {count:0};
+        const fullNameRx=new RegExp('^(?:'+fullNamePattern+')$','i');
         const shortName = name => {
             const match=name.toUpperCase().match(new RegExp(shortNamePattern));
             return match?match[1].replaceAll('_','-'):name.toUpperCase();
         };
-        const observed=rooms.map(item=>shortName(item.name));
-        const positions=observed.map(name=>expectedNames.indexOf(name));
-        if(new Set(observed).size!==observed.length || positions.some(
-            (position,index)=>position<0 || (index>0 && position<=positions[index-1])))
-            return {count:0,listMismatch:true};
-        const matched=rooms.filter(item=>shortName(item.name)===roomName.toUpperCase());
-        if(!matched.length) return {count:0,missingRoom:true};
-        if(matched.length!==1) return {count:0,listMismatch:true};
-        const actual=matched[0];
-        const centerY=actual.r.y+actual.r.height/2;
-        const gaps=rooms.map(x=>Math.abs(x.r.y+x.r.height/2-centerY)).filter(x=>x>1);
-        const tolerance=Math.min(Math.max(3,actual.r.height*.6),gaps.length?Math.min(...gaps)*.4:Infinity);
-        const valid=[];
+        // 先核验时间行，随后仅在其左侧房名列读取名单。
+        // 首格点击可能生成包含房名的提示/选中摘要，不能把全弹窗文字都当名单。
+        const grids=[];
         const timeLabel = e => {
             for(const value of [e.getAttribute('data-time'),e.getAttribute('title'),
                                 e.getAttribute('aria-label'),e.textContent]) {
@@ -1742,8 +1718,7 @@ async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col
             const a=start.getBoundingClientRect(),b=end.getBoundingClientRect();
             if(Math.min(a.width,a.height,b.width,b.height)<=0) continue;
             if([start,end].some(e=>getComputedStyle(e).visibility==='hidden')) continue;
-            if(Math.abs(a.y+a.height/2-centerY)>tolerance ||
-               Math.abs(b.y+b.height/2-centerY)>tolerance) continue;
+            if(Math.abs(a.y-b.y)>2) continue;
             if(Math.abs(a.width-b.width)>Math.max(2,a.width*0.15) ||
                Math.abs(a.height-b.height)>2) continue;
             const difference=endCol-startCol;
@@ -1763,8 +1738,53 @@ async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col
                         Math.abs((r.x-a.x)-(i+1-startCol)*a.width)>Math.max(3,Math.abs(i+1-startCol)*1.5);
                 })) continue;
             }
-            valid.push({start,end});
+            // 横向滚动后整行可能延伸到房名列下面；使用裁剪后的可视左界。
+            let left=start.parentElement.getBoundingClientRect().left;
+            for(let e=start.parentElement.parentElement;e&&panel.contains(e);e=e.parentElement) {
+                if(/^(auto|scroll|hidden|clip)$/.test(getComputedStyle(e).overflowX))
+                    left=Math.max(left,e.getBoundingClientRect().left+e.clientLeft);
+            }
+            grids.push({start,end,a,b,left});
         }
+        if(!grids.length) return {count:0};
+        // 房名和格子在同一次DOM读取中取坐标，避免两次读取间的滚动/重绘。
+        const rooms=[],seen=new Set();
+        let targetTextPresent=false;
+        const content=panel.querySelector('.ev_Dialog_PanelContent')||panel;
+        for(const e of content.querySelectorAll('*')) {
+            if(e.children.length) continue;
+            const r=e.getBoundingClientRect();
+            if(!r.width||!r.height||getComputedStyle(e).visibility==='hidden') continue;
+            const text=(e.textContent||'').trim();
+            if(!fullNameRx.test(text)) continue;
+            const name=text.replace(/[-_]+$/,'');
+            if(shortName(name)===roomName.toUpperCase()) targetTextPresent=true;
+            const center=r.y+r.height/2;
+            if(!grids.some(g=>r.right<=g.left+2 &&
+                Math.abs(center-g.a.y-g.a.height/2)<=Math.max(3,Math.min(r.height,g.a.height)*.6))) {
+                continue;
+            }
+            const key=name+'@'+Math.round(r.y);
+            if(seen.has(key)) continue;
+            seen.add(key); rooms.push({name,r});
+        }
+        rooms.sort((a,b)=>a.r.y-b.r.y||a.r.x-b.r.x);
+        if(!rooms.length) return {count:0};
+        const observed=rooms.map(item=>shortName(item.name));
+        const positions=observed.map(name=>expectedNames.indexOf(name));
+        if(new Set(observed).size!==observed.length || positions.some(
+            (position,index)=>position<0 || (index>0 && position<=positions[index-1])))
+            return {count:0,listMismatch:true,observed};
+        const matched=rooms.filter(item=>shortName(item.name)===roomName.toUpperCase());
+        // 房名还在但对应行暂时重绘隐藏时，继续等待，不能误报该账号没有此房间。
+        if(!matched.length) return {count:0,missingRoom:!targetTextPresent};
+        const actual=matched[0];
+        const centerY=actual.r.y+actual.r.height/2;
+        const gaps=rooms.map(x=>Math.abs(x.r.y+x.r.height/2-centerY)).filter(x=>x>1);
+        const tolerance=Math.min(Math.max(3,actual.r.height*.6),gaps.length?Math.min(...gaps)*.4:Infinity);
+        const valid=grids.filter(g=>actual.r.right<=g.left+2 &&
+            Math.abs(g.a.y+g.a.height/2-centerY)<=tolerance &&
+            Math.abs(g.b.y+g.b.height/2-centerY)<=tolerance);
         return {count:valid.length,start:valid[0]?.start||null,end:valid[0]?.end||null};
     }""", {"startCol": start_col, "endCol": end_col,
             "roomName": room_name, "roomRow": room_row,
@@ -1774,7 +1794,9 @@ async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col
     kept: list[ElementHandle] = []
     try:
         if await result.evaluate('value => !!value.listMismatch'):
-            raise SelectorConfigurationError('当前会议室名单有未知、重复或乱序房名，拒绝时间格点击')
+            observed = await result.evaluate('value => value.observed || []')
+            raise SelectorConfigurationError(
+                f'当前会议室名单有未知、重复或乱序房名，拒绝时间格点击；房名列={observed}')
         if await result.evaluate('value => !!value.missingRoom'):
             raise RoomNotVisibleError(f'{area}:{room_name}未出现在当前查询名单中')
         count = await result.evaluate("value => value.count")
@@ -1905,16 +1927,59 @@ async def interruptible_preparation(operation, interrupted: Callable[[], bool]):
 
 
 async def activate_booking_page(page: Page, *, wait_for_form: bool = True) -> None:
-    """替用户切换工作标签；确认日历已加载后再放行其他标签的初始化。"""
+    """串行初始化日历；刷新后若进入认证页，在激活锁外等待登录恢复。"""
     context = page.context
     if not hasattr(context, "_booking_activation_lock"):
         context._booking_activation_lock = asyncio.Lock()
-    async with context._booking_activation_lock:
-        if ACTIVATE_TAB_DURING_PREPARE:
-            await page.bring_to_front()
-        if wait_for_form:
-            await page.locator(CALENDAR_ICON).first.wait_for(
-                state="visible", timeout=NAVIGATION_TIMEOUT_MS)
+
+    def awaiting_authentication() -> bool:
+        current = getattr(page, "url", "")
+        if current in ("", "about:blank"):
+            return False
+        actual, expected = urlsplit(current), urlsplit(BOOKING_URL)
+        # SSO可能经过其他中转页；备用凭据入口仍自行严格限制为W3登录源。
+        return ((actual.scheme, actual.netloc, actual.path.rstrip("/")) !=
+                (expected.scheme, expected.netloc, expected.path.rstrip("/")))
+
+    auth_deadline = None
+    while True:
+        raise_if_run_stopped()
+        async with context._booking_activation_lock:
+            if ACTIVATE_TAB_DURING_PREPARE:
+                await page.bring_to_front()
+            if not wait_for_form:
+                return
+            form_deadline = monotonic_time.monotonic() + NAVIGATION_TIMEOUT_MS / 1000
+            if auth_deadline is not None:
+                form_deadline = min(form_deadline, auth_deadline)
+            while not awaiting_authentication():
+                raise_if_run_stopped()
+                if await page.locator(CALENDAR_ICON).first.is_visible():
+                    if auth_deadline is not None:
+                        logging.info("[认证恢复] 工作页面已恢复，继续准备预约表单")
+                    return
+                remaining = form_deadline - monotonic_time.monotonic()
+                if remaining <= 0:
+                    if auth_deadline is not None:
+                        raise RuntimeError("工作页面重新认证后日历仍未就绪，本轮停止准备")
+                    raise PlaywrightTimeout("等待预订页面日历超时，当前页面尚未完成表单初始化")
+                await sleep_or_stop(min(0.1, remaining))
+
+        # 不让登录页的60秒等待占住全局激活锁，其他就绪页面可继续准备/提交。
+        if auth_deadline is None:
+            auth_deadline = monotonic_time.monotonic() + AUTH_WAIT_SECONDS
+            logging.warning("[认证恢复] 工作页面刷新后进入登录/认证页；原地等待最多%s秒，可手动完成登录",
+                            AUTH_WAIT_SECONDS)
+        while awaiting_authentication():
+            raise_if_run_stopped()
+            remaining = auth_deadline - monotonic_time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("工作页面登录尚未恢复，本轮停止准备；请检查W3登录或完成页面要求的验证")
+            if await is_403_page(page):
+                AUTH_BLOCKED.set()
+                raise AuthBlocked("工作页面重新认证遇到403；停止全部任务")
+            await try_w3_backup_login(page, stopped=lambda: run_stop_reason() is not None)
+            await sleep_or_stop(min(0.25, max(0, auth_deadline - monotonic_time.monotonic())))
 
 
 async def auth_preflight(page: Page) -> bool:
