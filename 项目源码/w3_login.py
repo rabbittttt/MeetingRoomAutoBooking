@@ -1,4 +1,4 @@
-"""W3 自动登录的本机备用流程；仅在用户确认的登录源提交一次。"""
+"""W3 本机备用登录；仅在确认的登录源进行有间隔、有上限的重试。"""
 from __future__ import annotations
 
 import asyncio
@@ -13,8 +13,16 @@ from w3_credentials import CredentialError, load_credentials, normalize_login_or
 W3_LOGIN_ORIGIN = "https://login.huawei.com"
 AUTO_LOGIN_GRACE_SECONDS = 3.0
 CONTROL_TIMEOUT_MS = 2500
+MAX_LOGIN_ATTEMPTS = 3
+LOGIN_RETRY_SECONDS = 3.0
+LOGIN_RESULT_WAIT_SECONDS = 10.0
+LOGIN_OWNER_SECONDS = 60.0
 _LOGIN_TEXT = re.compile(r"^\s*登\s*录\s*$")
 _CHALLENGE_TEXT = re.compile(r"验证码|动态口令|短信验证|二次验证|安全验证|一次性密码")
+_REJECTED_TEXT = re.compile(
+    r"(?:账号|帐号|账户|用户名|密码).{0,12}(?:错误|不正确)|"
+    r"(?:账号|帐号|账户).{0,12}(?:锁定|冻结)|密码已过期|password\s+(?:is\s+)?incorrect",
+    re.IGNORECASE)
 
 
 def is_w3_login_url(url: str) -> bool:
@@ -56,7 +64,7 @@ async def _trusted_actions(*controls):
 
 
 class W3LoginFallback:
-    """同一浏览器运行共享一次尝试额度，避免多个工作标签重复提交密码。"""
+    """一次认证的所有标签共享重试额度；真实认证成功后允许下次掉线恢复。"""
 
     def __init__(self, *, credentials_loader=None, grace_seconds=AUTO_LOGIN_GRACE_SECONDS,
                  clock=time.monotonic):
@@ -66,8 +74,30 @@ class W3LoginFallback:
         self._lock = asyncio.Lock()
         self._first_seen = {}
         self._notices = set()
+        self.attempts = 0
         self.attempted = False
         self.disabled = False
+        self._next_attempt_at = 0.0
+        self._owner = None
+        self._owner_until = 0.0
+
+    def authenticated(self, page) -> None:
+        # 其他已登录工作页不能清零正在认证页面的额度，避免并发无限重试。
+        if self._lock.locked() or self._owner is None:
+            return
+        if self._owner is not page and not self._owner.is_closed():
+            return
+        self.attempts = 0
+        self._next_attempt_at = 0.0
+        self._owner = None
+        self._owner_until = 0.0
+        self._first_seen.clear()
+        self._notices.clear()
+        logging.info('[W3备用登录] 已核验进入会议室页面；后续若掉线，可重新尝试登录。')
+
+    def _waiting_for_peer(self, page) -> bool:
+        return (self._owner is not None and self._owner is not page
+                and not self._owner.is_closed() and self._clock() < self._owner_until)
 
     def _notice(self, key, message):
         if key not in self._notices:
@@ -75,14 +105,18 @@ class W3LoginFallback:
             logging.warning('[W3备用登录] %s', message)
 
     async def maybe_login(self, page, *, stopped=lambda: False) -> str:
-        if (stopped() or self.disabled or self.attempted
+        if (stopped() or self.disabled
                 or not is_w3_login_url(getattr(page, 'url', ''))):
             return 'skipped'
         async with self._lock:
-            if stopped() or self.disabled or self.attempted:
+            if stopped() or self.disabled or not is_w3_login_url(getattr(page, 'url', '')):
+                return 'skipped'
+            if self._clock() < self._next_attempt_at or self._waiting_for_peer(page):
                 return 'skipped'
             password = None
             credentials = None
+            started = False
+            clicking = False
             try:
                 # 选择器来自用户提供的账号登录页；结构不符时留给人工处理。
                 username = await _unique_visible(page.get_by_placeholder('W3账号', exact=True))
@@ -99,14 +133,27 @@ class W3LoginFallback:
                 if button is None:
                     return 'skipped'
                 password_element = await password.element_handle()
-                if (not await username.evaluate('(e, p) => e.form === p.form', password_element)
-                        or not await button.evaluate('(e, p) => !e.form || e.form === p.form', password_element)):
+                try:
+                    same_form = (await username.evaluate('(e, p) => e.form === p.form', password_element)
+                                 and await button.evaluate('(e, p) => !e.form || e.form === p.form', password_element))
+                finally:
+                    if password_element is not None:
+                        await password_element.dispose()
+                if not same_form:
                     return 'skipped'
                 first_seen = self._first_seen.setdefault(id(page), self._clock())
                 if self._clock() - first_seen < self._grace:
                     return 'waiting'
-                if _CHALLENGE_TEXT.search(await page.locator('body').inner_text(timeout=CONTROL_TIMEOUT_MS)):
+                body = await page.locator('body').inner_text(timeout=CONTROL_TIMEOUT_MS)
+                if _CHALLENGE_TEXT.search(body):
                     self._notice('challenge', '页面要求验证码或额外验证，请在浏览器手动完成。')
+                    return 'manual'
+                if _REJECTED_TEXT.search(body):
+                    self.disabled = True
+                    self._notice('rejected', '页面提示账号密码错误、过期或账号锁定，停止自动提交，请手动处理。')
+                    return 'manual'
+                if self.attempts >= MAX_LOGIN_ATTEMPTS:
+                    self._notice('limit', f'本次认证已自动尝试{MAX_LOGIN_ATTEMPTS}次，仍未恢复；请手动完成登录。')
                     return 'manual'
                 credentials = self._load()
                 if credentials is None:
@@ -124,8 +171,13 @@ class W3LoginFallback:
                     return 'manual'
                 if stopped() or not is_w3_login_url(page.url):
                     return 'skipped'
-                # 即使控件重绘/提交失败也不再自动尝试，避免错误密码反复触发锁定。
+                # 连续失败次数跨刷新/新标签共享，直到实际预订表单认证成功才清零。
+                self.attempts += 1
                 self.attempted = True
+                started = True
+                self._owner = page
+                self._owner_until = self._clock() + LOGIN_OWNER_SECONDS
+                self._next_attempt_at = self._clock() + LOGIN_RETRY_SECONDS
                 # 使用已保存的凭据覆盖预填内容；先清旧密码，fill会替换原账号。
                 await password.fill('', timeout=CONTROL_TIMEOUT_MS)
                 if stopped() or not is_w3_login_url(page.url):
@@ -136,29 +188,51 @@ class W3LoginFallback:
                 await password.fill(credentials.password, timeout=CONTROL_TIMEOUT_MS)
                 if (stopped() or not is_w3_login_url(page.url)
                         or not await _trusted_actions(username, password, button)):
-                    await password.fill('', timeout=CONTROL_TIMEOUT_MS)
+                    if is_w3_login_url(page.url):
+                        await password.fill('', timeout=CONTROL_TIMEOUT_MS)
                     return 'skipped'
-                logging.info('[W3备用登录] 已填写保存的账号密码，等待登录按钮可用。')
+                logging.info('[W3备用登录] 第%d/%d次｜已填写保存的账号密码，等待登录按钮可用。',
+                             self.attempts, MAX_LOGIN_ATTEMPTS)
+                # click超时不代表请求没发出，也要先等待结果再允许补点。
+                clicking = True
+                self._next_attempt_at = self._clock() + LOGIN_RESULT_WAIT_SECONDS
                 await button.click(timeout=CONTROL_TIMEOUT_MS)
-                logging.info('[W3备用登录] 已填写并提交一次登录，等待认证；本次运行不重复提交密码。')
+                self._next_attempt_at = self._clock() + LOGIN_RESULT_WAIT_SECONDS
+                logging.info('[W3备用登录] 第%d/%d次｜已点击登录，等待认证；%s秒后仍在登录页则重试。',
+                             self.attempts, MAX_LOGIN_ATTEMPTS, LOGIN_RESULT_WAIT_SECONDS)
                 return 'submitted'
+            except asyncio.CancelledError:
+                if started and self._owner is page:
+                    # 页面准备被抢订截止/让路取消时，不长期占住其他页的认证资格。
+                    # 已开始click的等待期和总次数仍保留，不能立即补交未知结果。
+                    self._owner_until = self._clock()
+                raise
             except CredentialError:
                 self.disabled = True
                 self._notice('credentials', '本机备用凭据无法读取或解密，请在高级设置中重新保存。')
                 return 'manual'
             except Exception:
                 # Playwright.fill的异常可能含输入值，禁止记录原异常/调用堆栈。
-                if self.attempted:
-                    self.disabled = True
+                if started:
+                    delay = LOGIN_RESULT_WAIT_SECONDS if clicking else LOGIN_RETRY_SECONDS
+                    self._next_attempt_at = self._clock() + delay
                     if password is not None and is_w3_login_url(getattr(page, 'url', '')):
                         try:
                             await password.fill('', timeout=CONTROL_TIMEOUT_MS)
                         except Exception:
                             pass
-                    self._notice('controls', '备用登录未完成，请手动登录；本次运行不再自动提交。')
-                return 'manual'
+                    logging.warning('[W3备用登录] 第%d/%d次｜填表或登录按钮操作未完成；%s秒后重新检查登录状态。',
+                                    self.attempts, MAX_LOGIN_ATTEMPTS, delay)
+                return 'retrying'
             finally:
                 credentials = None
+
+
+def notify_w3_authenticated(page) -> None:
+    """只由已验证预订表单就绪的调用方通知，不把URL跳转或click返回当登录成功。"""
+    fallback = getattr(getattr(page, 'context', None), '_booking_w3_fallback', None)
+    if fallback is not None:
+        fallback.authenticated(page)
 
 
 async def try_w3_backup_login(page, *, stopped=lambda: False) -> str:

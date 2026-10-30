@@ -48,14 +48,19 @@ class W3LoginBrowserTests(unittest.IsolatedAsyncioTestCase):
         async def route(request_route):
             self.requests.append(request_route.request.url)
             if request_route.request.url == READY_URL:
-                await request_route.fulfill(body='<meta charset="utf-8"><button>图标 添加会议室</button>', content_type='text/html')
+                await request_route.fulfill(body='<meta charset="utf-8"><button>图标 添加会议室</button>'
+                                                '<button class="ev_datepicker_icon_calendar">日期</button>',
+                                            content_type='text/html')
             else:
                 await request_route.fulfill(body=self.html, content_type='text/html')
 
         await self.context.route('**/*', route)
         self.page = await self.context.new_page()
         self.loader = Mock(return_value=DUMMY)
-        self.login = w3_login.W3LoginFallback(credentials_loader=self.loader, grace_seconds=0)
+        self.tick = [100.0]
+        self.login = w3_login.W3LoginFallback(credentials_loader=self.loader, grace_seconds=0,
+                                               clock=lambda: self.tick[0])
+        self.context._booking_w3_fallback = self.login
 
     async def asyncTearDown(self):
         await self.browser.close()
@@ -101,14 +106,18 @@ class W3LoginBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.page.get_by_placeholder('密码', exact=True).input_value(), DUMMY.password)
         self.assertEqual(await self.login.maybe_login(self.page), 'skipped')
 
-    async def test_failed_login_does_not_loop_or_repeat_after_reload(self):
+    async def test_pending_login_waits_then_retries_up_to_three_across_reload(self):
         await self.open_login()
-        await self.login.maybe_login(self.page)
-        for _ in range(3):
+        for attempt in range(1, 4):
+            self.assertEqual(await self.login.maybe_login(self.page), 'submitted')
+            self.assertEqual(self.login.attempts, attempt)
             self.assertEqual(await self.login.maybe_login(self.page), 'skipped')
-        self.assertEqual(await self.page.evaluate('window.loginClicks'), 1)
-        await self.page.reload()
-        await self.login.maybe_login(self.page)
+            self.assertEqual(await self.page.evaluate('window.loginClicks'), 1)
+            await self.page.reload()
+            self.assertEqual(await self.login.maybe_login(self.page), 'skipped')
+            self.tick[0] += w3_login.LOGIN_RESULT_WAIT_SECONDS
+        self.assertEqual(await self.login.maybe_login(self.page), 'manual')
+        self.assertEqual(self.loader.call_count, 3)
         await self.assert_empty()
 
     async def test_untrusted_similar_domain_never_reads_or_fills_credentials(self):
@@ -246,7 +255,7 @@ class W3LoginBrowserTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(DUMMY.password, '\n'.join(logs.output))
         await self.assert_empty()
 
-    async def test_fill_exception_cannot_leak_password_or_retry(self):
+    async def test_fill_exception_cannot_leak_password_and_recovers_after_delay(self):
         await self.open_login()
         # 用locator类注入异常，模拟Playwright错误中含fill输入值的情况。
         from playwright.async_api import Locator
@@ -258,11 +267,15 @@ class W3LoginBrowserTests(unittest.IsolatedAsyncioTestCase):
             return await original(locator, value, **kwargs)
 
         with patch.object(Locator, 'fill', fill), self.assertLogs(level='WARNING') as logs:
-            self.assertEqual(await self.login.maybe_login(self.page), 'manual')
+            self.assertEqual(await self.login.maybe_login(self.page), 'retrying')
         self.assertNotIn(DUMMY.password, '\n'.join(logs.output))
         self.assertEqual(await self.login.maybe_login(self.page), 'skipped')
         self.assertEqual(await self.page.evaluate('window.loginClicks'), 0)
         self.assertEqual(await self.page.get_by_placeholder('密码', exact=True).input_value(), '')
+        self.tick[0] += w3_login.LOGIN_RETRY_SECONDS
+        self.assertEqual(await self.login.maybe_login(self.page), 'submitted')
+        self.assertEqual(await self.page.evaluate('window.loginClicks'), 1)
+        self.assertEqual(self.login.attempts, 2)
 
     async def test_context_shared_quota_prevents_parallel_tab_password_submissions(self):
         await self.open_login()
@@ -294,6 +307,7 @@ class W3LoginBrowserTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(core, 'STOP_REQUESTED', asyncio.Event()):
             self.assertTrue(await core.auth_preflight(self.page))
         self.assertTrue(self.login.attempted)
+        self.assertEqual(self.login.attempts, 0)
 
     async def test_new_page_authentication_uses_the_same_fallback(self):
         import booking_core as core
@@ -305,6 +319,23 @@ class W3LoginBrowserTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(core, 'STOP_REQUESTED', asyncio.Event()):
             await core.PagePool(self.context, self.page)._authenticate_new_page(self.page, 2)
         self.assertTrue(self.login.attempted)
+        self.assertEqual(self.login.attempts, 0)
+
+    async def test_preparation_reauthenticates_after_a_later_login_redirect(self):
+        import booking_core as core
+        with ExitStack() as stack:
+            for name in ('STOP_REQUESTED', 'AUTH_BLOCKED', 'DRIVER_LOST', 'CONFIG_BLOCKED'):
+                stack.enter_context(patch.object(core, name, asyncio.Event()))
+            stack.enter_context(patch.object(core, 'BOOKING_URL', READY_URL))
+            stack.enter_context(patch.object(core, 'AUTH_WAIT_SECONDS', 4))
+            stack.enter_context(patch.object(core, 'is_403_page', AsyncMock(return_value=False)))
+            for _ in range(2):
+                await self.open_login(mode='success')
+                await core.activate_booking_page(self.page)
+                self.assertEqual(self.page.url, READY_URL)
+                self.assertTrue(await self.page.locator(core.CALENDAR_ICON).is_visible())
+                self.assertEqual(self.login.attempts, 0)
+            self.assertEqual(self.loader.call_count, 2)
 
 
 class OriginTests(unittest.TestCase):

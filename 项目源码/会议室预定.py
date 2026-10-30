@@ -38,7 +38,7 @@ from urllib.parse import urlsplit
 from account_auth import AuthorizationError, require_authorized_account
 from booking_profile import PROFILE as DEPLOYMENT_PROFILE
 from date_picker import DatePickerStructureError, select_booking_date
-from w3_login import is_w3_login_url, try_w3_backup_login
+from w3_login import is_w3_login_url, notify_w3_authenticated, try_w3_backup_login
 
 from playwright.async_api import (
     BrowserContext, ElementHandle, Locator, Page, Playwright, TimeoutError as PlaywrightTimeout,
@@ -200,6 +200,8 @@ OTHER_FAILURE_EXTRA_RETRIES = 10  # 非提前天数错误：额外原页面重�
 DROPDOWN_RETRY_TIMES = 2
 DROPDOWN_LOAD_SECONDS = 4.5  # 下拉展开后等待异步选项加载，避免立即count()误判
 AUTH_WAIT_SECONDS = 60  # 首个页面完成SSO认证的最长等待秒数
+AUTH_INITIAL_ATTEMPTS = 3  # 首次登录的有界重试轮数，所有轮共用备用登录状态
+AUTH_RETRY_DELAY_SECONDS = 2.0
 AUTH_STAGGER_SECONDS = 1.5  # 新标签首次认证访问错开秒数；认证完成后表单全部并发
 # 首个标签先完成认证；其他新标签错峰完成首次认证访问，避免并发SSO触发403。
 # 认证后各标签并发填写；表单操作没有全局串行锁。
@@ -1956,6 +1958,7 @@ async def activate_booking_page(page: Page, *, wait_for_form: bool = True) -> No
                 raise_if_run_stopped()
                 if await page.locator(CALENDAR_ICON).first.is_visible():
                     if auth_deadline is not None:
+                        notify_w3_authenticated(page)
                         logging.info("[认证恢复] 工作页面已恢复，继续准备预约表单")
                     return
                 remaining = form_deadline - monotonic_time.monotonic()
@@ -1983,38 +1986,61 @@ async def activate_booking_page(page: Page, *, wait_for_form: bool = True) -> No
 
 
 async def auth_preflight(page: Page) -> bool:
-    """复用Chrome启动时的第一个标签完成SSO，不额外新建登录标签。"""
+    """首个标签有界重试SSO；轮次不会重建或清空共享的备用登录尝试状态。"""
     logging.info("[登录] 复用首个标签页进行认证，不创建独立登录页")
-    try:
+
+    async def authenticate_once() -> bool:
         await activate_booking_page(page, wait_for_form=False)
         await page.goto(BOOKING_URL, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
         await activate_booking_page(page, wait_for_form=False)
-        until = asyncio.get_running_loop().time() + AUTH_WAIT_SECONDS
-        while asyncio.get_running_loop().time() < until:
-            if STOP_REQUESTED.is_set():
-                raise StopRequested("用户停止登录")
+        while True:
+            raise_if_run_stopped()
             if await is_403_page(page):
                 AUTH_BLOCKED.set()
-                logging.error("[登录] 预订页面返回403，停止脚本；请确认账户权限与认证状态")
-                await save_debug(page, "登录403", mask_inputs=True)
-                return False
+                raise AuthBlocked("预订页面返回403")
             try:
                 if await page.get_by_role("button", name=ADD_ROOM_BUTTON).is_visible():
+                    notify_w3_authenticated(page)
                     logging.info("[登录] 单页认证成功，保留首个标签作为首间会议室的工作页面")
                     return True
-            except Exception:
-                pass
-            await try_w3_backup_login(page, stopped=STOP_REQUESTED.is_set)
-            await asyncio.sleep(1)
-        logging.error("[登录] %s秒内未进入预订表单，可能仍在SSO/二次验证页面", AUTH_WAIT_SECONDS)
-        await save_debug(page, "登录未完成", mask_inputs=True)
-        return False
-    except StopRequested:
-        raise
-    except Exception as exc:
-        logging.error("[登录] 打开预订页失败：%s", str(exc).splitlines()[0])
-        await save_debug(page, "登录打开失败", mask_inputs=True)
-        return False
+            except Exception as exc:
+                if is_driver_disconnected(exc):
+                    raise
+            await try_w3_backup_login(page, stopped=lambda: run_stop_reason() is not None)
+            await sleep_or_stop(0.4)
+
+    for attempt in range(1, AUTH_INITIAL_ATTEMPTS + 1):
+        raise_if_run_stopped()
+        logging.info("[登录] 开始第%d/%d轮认证｜本轮最多%s秒",
+                     attempt, AUTH_INITIAL_ATTEMPTS, AUTH_WAIT_SECONDS)
+        try:
+            return await interruptible_preparation(
+                asyncio.wait_for(authenticate_once(), timeout=AUTH_WAIT_SECONDS),
+                lambda: run_stop_reason() is not None)
+        except PreparationInterrupted:
+            raise_if_run_stopped()
+            return False
+        except StopRequested:
+            raise
+        except AuthBlocked:
+            logging.error("[登录] 预订页面返回403，停止重试；请确认账户权限与认证状态")
+            await save_debug(page, "登录403", mask_inputs=True)
+            return False
+        except Exception as exc:
+            if is_driver_disconnected(exc):
+                DRIVER_LOST.set()
+                logging.error("[登录] 浏览器连接中断，停止认证重试")
+                return False
+            reason = ("页面加载或认证等待超时" if isinstance(exc, (PlaywrightTimeout, TimeoutError))
+                      else "页面加载或认证未完成")
+            if attempt == AUTH_INITIAL_ATTEMPTS:
+                logging.error("[登录] %d轮认证均未完成；本次任务结束，请检查登录页面", attempt)
+                await save_debug(page, "登录未完成", mask_inputs=True)
+                return False
+            logging.warning("[登录重试] 第%d/%d轮未完成｜%s；%.1f秒后重新访问会议室页面",
+                            attempt, AUTH_INITIAL_ATTEMPTS, reason, AUTH_RETRY_DELAY_SECONDS)
+            await sleep_or_stop(AUTH_RETRY_DELAY_SECONDS)
+    return False
 
 
 class PagePool:
@@ -2074,6 +2100,7 @@ class PagePool:
                     raise AuthBlocked(f"工作标签{index}首次认证遇到403")
                 button = page.get_by_role("button", name=ADD_ROOM_BUTTON)
                 if await button.count() >= 1 and await button.first.is_visible():
+                    notify_w3_authenticated(page)
                     logging.info("[认证错峰] 工作标签%d：认证完成，可参加并行填表", index)
                     return
                 await try_w3_backup_login(page, stopped=STOP_REQUESTED.is_set)

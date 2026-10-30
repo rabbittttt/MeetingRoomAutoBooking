@@ -424,7 +424,7 @@ class W3CredentialsDialog:
         surface.pack(fill="both", expand=True, padx=10, pady=10)
         body = surface.inner
         ttk.Label(body, text="W3备用登录", style="Section.TLabel").pack(anchor="w")
-        ttk.Label(body, text="先复用浏览器自动登录；出现登录页时才尝试一次。\n验证码或二次验证仍需手动完成。",
+        ttk.Label(body, text="先复用浏览器自动登录；每次认证最多尝试3次。\n验证码或二次验证仍需手动完成。",
                   style="CardMuted.TLabel", wraplength=440).pack(anchor="w", pady=(6, 10))
         for label, variable, masked in (("公司账号", self.username_var, False),
                                          ("密码（每次修改需重新输入）", self.password_var, True)):
@@ -1171,7 +1171,7 @@ class BookingGUI:
             self.setting_vars[key] = variable
             field, _ = self._label_entry(grid, text, variable, 22)
             field.grid(row=0, column=i, sticky="w", padx=(0, 18))
-        login_card = self.card(tab, "W3备用登录", "优先复用自动登录；登录页尝试一次，验证码或二次验证需手动完成。")
+        login_card = self.card(tab, "W3备用登录", "优先复用自动登录；每次认证最多尝试3次，验证码或二次验证需手动完成。")
         login_actions = ttk.Frame(login_card, style="Card.TFrame")
         login_actions.pack(fill="x")
         self.w3_status_var = tk.StringVar(value="未设置")
