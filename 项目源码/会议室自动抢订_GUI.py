@@ -1193,17 +1193,15 @@ class BookingGUI:
         else:
             self.w3_status_var.set("构建自检：不读取本机凭据")
         logging_card = self.card(tab, "日志和诊断")
-        ChoiceChip(logging_card, text="显示详细网页日志", variable=self.verbose_var,
-                   width=166).pack(anchor="w")
-        ChoiceChip(logging_card, text="记录逐步骤耗时", variable=self.timing_var,
-                   width=166).pack(anchor="w", pady=(6, 0))
+        logging_row = ttk.Frame(logging_card, style="Card.TFrame")
+        logging_row.pack(fill="x")
+        ChoiceChip(logging_row, text="显示详细网页日志", variable=self.verbose_var,
+                   width=166).pack(side="left", padx=(0, 8))
+        ChoiceChip(logging_row, text="记录逐步骤耗时", variable=self.timing_var,
+                   width=166).pack(side="left")
         paths = self.card(tab, "文件保存位置")
-        ttk.Label(paths, text=f"区域：{core.DEPLOYMENT_LABEL}    业务核心识别码：{CORE_SHA256[:12]}",
-                  style="CardMuted.TLabel").pack(anchor="w", pady=(0, 2))
-        for txt in (f"配置：{CONFIG_FILE}", f"日志：{core.LOG_DIR}", f"Chrome登录状态：{core.PROFILE_DIR}"):
-            ttk.Label(paths, text=txt, style="CardMuted.TLabel", wraplength=920).pack(anchor="w", pady=(2, 7))
-        ttk.Label(paths, text="本机登录信息仅保存在当前用户账户。不要把 Chrome 登录数据、个人配置和日志发给其他人。",
-                  style="CardMuted.TLabel").pack(anchor="w", pady=(6, 0))
+        for txt in (f"配置：{CONFIG_FILE}", f"日志：{core.LOG_DIR}"):
+            ttk.Label(paths, text=txt, style="CardMuted.TLabel", wraplength=920).pack(anchor="w", pady=(1, 2))
 
     def _refresh_w3_credentials_status(self):
         try:
