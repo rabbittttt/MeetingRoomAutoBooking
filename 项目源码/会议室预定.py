@@ -51,6 +51,8 @@ DRY_RUN = True      # 首次验证保持 True；验证点击与状态无误后�
 COLOR_CONSOLE_LOGS = True  # 在PyCharm/支持ANSI颜色的终端，将WARNING显示为黄、ERROR显示为红
 HEADLESS = False    # 公司 SSO/界面建议可见模式
 BROWSER_CHANNEL = "chrome"  # 使用电脑本地安装的 Chrome，不再依赖 Playwright 下载的 Chromium
+BROWSER_LAUNCH_ATTEMPTS = 3
+BROWSER_LAUNCH_RETRY_SECONDS = 2.0
 # 每次导航后自动激活并等待表单初始化；激活阶段串行，后续填表并行。
 ACTIVATE_TAB_DURING_PREPARE = True
 # 按每个页面环节统计耗时，方便验证是否仍存在后台标签导致的固定4秒等待。
@@ -3542,6 +3544,42 @@ async def run_modes_safely(*operations) -> None:
             raise outcome
 
 
+def is_browser_profile_busy(exc: BaseException) -> bool:
+    """仅识别浏览器资料目录互斥冲突，不把缺浏览器或一般权限错误当占用。"""
+    message = str(exc).lower()
+    if "processsingleton" in message:
+        # 此次Windows诊断明确返回共享冲突32；其他明确系统错误不猜作占用。
+        codes = re.findall(r"error code:\s*(\d+)", message)
+        if codes:
+            return "32" in codes
+        return "already in use" in message
+    return "profile appears to be in use by another" in message
+
+
+async def launch_booking_browser(playwright: Playwright) -> BrowserContext:
+    """给上次浏览器退出留出短暂时间；不删除资料、不结束未知进程。"""
+    for attempt in range(1, BROWSER_LAUNCH_ATTEMPTS + 1):
+        raise_if_run_stopped()
+        try:
+            return await playwright.chromium.launch_persistent_context(
+                user_data_dir=str(PROFILE_DIR), channel=BROWSER_CHANNEL,
+                headless=HEADLESS, accept_downloads=False,
+                viewport={"width": 1536, "height": 900},
+            )
+        except Exception as exc:
+            if not is_browser_profile_busy(exc):
+                raise
+            if attempt == BROWSER_LAUNCH_ATTEMPTS:
+                raise RuntimeError(
+                    f'浏览器登录资料目录仍被占用：{PROFILE_DIR}。'
+                    '请停止其他会议室程序中的任务，并关闭它打开的浏览器窗口，随后重新开始。'
+                    '若已无窗口仍报错，请先确认残留进程；不要删除登录资料目录。') from None
+            logging.warning('[浏览器启动] 登录资料目录被占用｜第%d/%d次未完成；%.1f秒后重试｜%s',
+                            attempt, BROWSER_LAUNCH_ATTEMPTS, BROWSER_LAUNCH_RETRY_SECONDS, PROFILE_DIR)
+            await sleep_or_stop(BROWSER_LAUNCH_RETRY_SECONDS)
+    raise RuntimeError('浏览器启动重试次数必须大于0')
+
+
 async def main(mode: Literal["release", "watch", "both", "list-rooms"]) -> None:
     setup_logging()
     try:
@@ -3573,11 +3611,7 @@ async def main(mode: Literal["release", "watch", "both", "list-rooms"]) -> None:
         return
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as p:
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir=str(PROFILE_DIR), channel=BROWSER_CHANNEL,
-            headless=HEADLESS, accept_downloads=False,
-            viewport={"width": 1536, "height": 900},
-        )
+        context = await launch_booking_browser(p)
         context.set_default_timeout(ACTION_TIMEOUT_MS)
         lifecycle = {"closing": False}
 
