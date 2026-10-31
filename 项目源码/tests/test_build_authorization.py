@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import build_exe
-from deployment_profiles import get_profile
+from deployment_profiles import PROFILES, get_profile
 from tools import verify_embedded
 
 
@@ -79,6 +79,92 @@ class BuildAuthorizationTests(unittest.TestCase):
         self.assertTrue(subprocess_run.call_args_list[-1].kwargs["check"])
         self.assertFalse((self.root / "build" / "region_sources" / "H7" / LICENSE_NAME).exists())
         self.assertTrue(self.output.is_file())
+
+    def test_all_choice_builds_every_region_once_with_separate_outputs(self):
+        selected = tuple(PROFILES)
+        with patch("builtins.input", return_value=str(len(selected) + 1)):
+            self.assertEqual(build_exe.choose_profile(), "all")
+
+        self.source_license.write_bytes(OLD_LICENSE)
+        events = []
+
+        def fake_subprocess(command, **kwargs):
+            if command[1] == "-B":
+                events.append(("import", Path(kwargs["cwd"]).name))
+            else:
+                self.assertEqual(command[1], str(self.root / "tools" / "verify_embedded.py"))
+                self.assertTrue(kwargs["check"])
+                events.append(("verify", command[-1]))
+            return types.SimpleNamespace(returncode=0)
+
+        def fake_packager(command, *, workdir):
+            profile_id = workdir.name
+            events.append(("build", profile_id))
+            self.assertEqual(command[-1], str(workdir / self.gui.name))
+            self.assertEqual(command[command.index("--distpath") + 1],
+                             str(self.root / "dist" / profile_id))
+            self.assertNotIn(LICENSE_NAME, " ".join(command))
+            exe = self.root / "dist" / profile_id / f"会议室自动抢订_{profile_id}.exe"
+            exe.parent.mkdir(parents=True, exist_ok=True)
+            exe.write_bytes(b"MZ-local-test-output")
+
+        def fake_smoke(exe):
+            events.append(("smoke", exe.parent.name))
+
+        with patch.object(sys, "argv", ["build_exe.py", "--profile", "all"]), \
+                patch.object(build_exe, "select_build_python", return_value=Path(sys.executable)) as choose_python, \
+                patch.object(build_exe, "ensure_dependencies") as dependencies, \
+                patch.object(build_exe, "run_packager", side_effect=fake_packager) as packager, \
+                patch.object(build_exe, "smoke_test", side_effect=fake_smoke), \
+                patch.object(build_exe.subprocess, "run", side_effect=fake_subprocess):
+            self.assertEqual(build_exe.main(), 0)
+
+        choose_python.assert_called_once()
+        dependencies.assert_called_once()
+        self.assertEqual(packager.call_count, len(selected))
+        self.assertEqual(events, [*(('import', profile_id) for profile_id in selected),
+                                  *(event for profile_id in selected
+                                    for event in (('build', profile_id), ('smoke', profile_id),
+                                                  ('verify', profile_id)))])
+        self.assertEqual(self.source_license.read_bytes(), OLD_LICENSE)
+        for profile_id in selected:
+            self.assertFalse((self.root / "build" / "region_sources" / profile_id / LICENSE_NAME).exists())
+            self.assertFalse((self.root / "dist" / profile_id / LICENSE_NAME).exists())
+
+    def test_all_check_prepares_regions_without_packaging(self):
+        with patch.object(sys, "argv", ["build_exe.py", "--profile", "all", "--check"]), \
+                patch.object(build_exe, "select_build_python") as choose_python, \
+                patch.object(build_exe, "run_packager") as packager:
+            self.assertEqual(build_exe.main(), 0)
+        choose_python.assert_not_called()
+        packager.assert_not_called()
+        for profile_id in PROFILES:
+            self.assertTrue((self.root / "build" / "region_sources" / profile_id / "booking_profile.py").is_file())
+
+    def test_all_stops_after_failed_region_without_reporting_success(self):
+        built = []
+
+        def fake_packager(command, *, workdir):
+            built.append(workdir.name)
+            exe = self.root / "dist" / workdir.name / f"会议室自动抢订_{workdir.name}.exe"
+            exe.parent.mkdir(parents=True, exist_ok=True)
+            exe.write_bytes(b"MZ-local-test-output")
+
+        def fake_smoke(exe):
+            if exe.parent.name == "H7":
+                raise RuntimeError("H7启动自检失败")
+
+        with patch.object(sys, "argv", ["build_exe.py", "--profile", "all"]), \
+                patch.object(build_exe, "select_build_python", return_value=Path(sys.executable)), \
+                patch.object(build_exe, "ensure_dependencies"), \
+                patch.object(build_exe, "run_packager", side_effect=fake_packager), \
+                patch.object(build_exe, "smoke_test", side_effect=fake_smoke), \
+                patch.object(build_exe.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)), \
+                patch.object(build_exe, "out") as log:
+            with self.assertRaisesRegex(RuntimeError, "H7启动自检失败"):
+                build_exe.main()
+        self.assertEqual(built, ["F5", "H7"])
+        self.assertFalse(any("[SUCCESS]" in call.args[0] for call in log.call_args_list))
 
     def test_build_completes_without_source_or_output_authorization_file(self):
         self.run_build()

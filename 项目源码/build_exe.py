@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """会议室自动抢订：可重复使用的 Windows EXE 构建器。
 
-无需每次修改本文件。运行「一键打包EXE.cmd」后选择 F5/F5-1A 或 H7。
-两套区域资料由 deployment_profiles.py 维护，选中资料编译进对应EXE。
+无需每次修改本文件。运行「一键打包EXE.cmd」后选择单个区域或全部打包。
+各区域资料由 deployment_profiles.py 维护，每套资料分别编译进对应EXE。
 打包前会从用户的「会议室预定.py」重新生成 booking_core.py，防止打进旧代码。
 
 运行：
     python build_exe.py --check       # 查看实际源码及检查语法（不安装依赖，不打包）
     python build_exe.py --sync-only   # 只同步最新预约核心
     python build_exe.py --profile H7  # Windows 上构建 H7、再自检
+    python build_exe.py --profile all # 依次构建全部区域、逐个自检
     python build_exe.py               # 交互选择本次区域
 """
 from __future__ import annotations
@@ -189,19 +190,22 @@ def choose_profile() -> str:
     out("\n请选择本次打包区域：")
     for index, profile_id in enumerate(choices, 1):
         out(f"  {index}. {get_profile_label(profile_id)}")
+    out(f"  {len(choices) + 1}. 全部打包（{len(choices)}套区域）")
     out("  Q. 取消")
     while True:
         try:
             value = input("请输入编号：").strip()
         except EOFError as exc:
-            raise RuntimeError("当前无法交互选择，请使用 --profile F5 或 --profile H7") from exc
+            raise RuntimeError("当前无法交互选择，请使用 --profile 区域编号 或 --profile all") from exc
         if value.lower() == "q":
             raise KeyboardInterrupt
         if value in choices:
             return value
+        if value.lower() == "all" or value == str(len(choices) + 1):
+            return "all"
         if value.isdigit() and 1 <= int(value) <= len(choices):
             return choices[int(value) - 1]
-        out("输入无效，请选择显示的编号；不会自动打包其他区域。")
+        out("输入无效，请选择显示的编号。")
 
 
 def python_command(python: Path, code: str, *, timeout: int = 15) -> tuple[bool, str]:
@@ -434,48 +438,62 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="会议室自动抢订可复用Windows EXE打包工具")
     parser.add_argument("--check", action="store_true", help="只做源码定位与语法检查，不打包")
     parser.add_argument("--sync-only", action="store_true", help="只同步最新会议室预定.py到booking_core.py")
-    parser.add_argument("--profile", choices=tuple(PROFILES), help="打包区域：F5包含F5/F5-1A，H7包含H7")
+    parser.add_argument("--profile", choices=(*PROFILES, "all"), help="打包区域编号，或 all 打包全部区域")
     args = parser.parse_args()
-    profile_id = args.profile or ("F5" if args.check or args.sync_only else choose_profile())
-    profile = get_profile(profile_id)
+    selection = args.profile or ("F5" if args.check or args.sync_only else choose_profile())
+    profile_ids = tuple(PROFILES) if selection == "all" else (selection,)
+    profiles = [get_profile(profile_id) for profile_id in profile_ids]
     settings = load_settings()
-    settings["profile_id"] = profile_id
+    settings["profile_id"] = "F5" if selection == "all" else selection
     source, gui = sync_sources(settings)
-    staged_source, staged_gui = prepare_build_sources(settings, source, gui, profile)
+    staged = {profile["id"]: prepare_build_sources(settings, source, gui, profile)
+              for profile in profiles}
     if args.check or args.sync_only:
-        out(f"[成功] {profile['label']} 配置、源码同步及语法检查通过；未执行EXE打包")
+        out(f"[成功] {', '.join(profile['label'] for profile in profiles)} 配置、源码同步及语法检查通过；未执行EXE打包")
         return 0
     if os.name != "nt":
         raise RuntimeError("Windows EXE必须在 Windows 10/11 上打包；当前平台只能使用 --check")
     python = select_build_python()
     out(f"[打包Python] {python}")
     ensure_dependencies(python, settings)
-    # GUI导入最新的 booking_core；在同一个Python环境中提前验证，避免打包后才发现漏依赖。
-    out("[自检] 测试GUI与当前预约核心的模块导入")
-    env = os.environ.copy()
-    extra_paths = [str(staged_source.parent), *(str(resolve_path(value).resolve()) for value in settings["module_paths"])]
-    env["PYTHONPATH"] = os.pathsep.join(extra_paths)
-    check_code = ("import importlib; import booking_core as c; import tkinter; "
-                  f"g=importlib.import_module({staged_gui.stem!r}); "
-                  f"assert c.DEPLOYMENT_ID == {profile_id!r}; "
-                  f"assert c.RELEASE_OPEN_AT == g.DEFAULT_CONFIG['release_open_at'] == {profile['release_open_at']!r}; "
-                  f"assert c.ROOM_CATALOG == {profile['room_catalog']!r}; "
-                  "print('GUI/Core/Profile/Tk import OK')")
-    check = subprocess.run([str(python), "-B", "-c", check_code], cwd=staged_source.parent, env=env)
-    if check.returncode:
-        raise RuntimeError("界面与预约核心导入失败。请检查工程内会议室预定.py及模块兼容性；新增库请填写extra_dependencies。")
-    cmd, exe = build_command(python, settings, staged_gui, staged_source)
-    out(f"[目标EXE] {exe}")
-    out(f"[源码SHA256] {sha256(source)}（此源码会进入本次EXE）")
-    run_packager(cmd, workdir=staged_source.parent)
-    # 授权文件由管理员独立分发，构建过程不读取、生成或覆盖任何授权JSON。
-    smoke_test(exe)
-    subprocess.run([str(python), str(ROOT / "tools" / "verify_embedded.py"),
-                    "--profile", profile_id], cwd=ROOT, check=True)
+    # 先核验所有区域的模块导入，避免全部打包时前几套已成功、最后一套才发现配置错误。
+    for profile in profiles:
+        profile_id = profile["id"]
+        staged_source, staged_gui = staged[profile_id]
+        out(f"[自检] 测试 {profile['label']} 的GUI与预约核心模块导入")
+        env = os.environ.copy()
+        extra_paths = [str(staged_source.parent), *(str(resolve_path(value).resolve()) for value in settings["module_paths"])]
+        env["PYTHONPATH"] = os.pathsep.join(extra_paths)
+        check_code = ("import importlib; import booking_core as c; import tkinter; "
+                      f"g=importlib.import_module({staged_gui.stem!r}); "
+                      f"assert c.DEPLOYMENT_ID == {profile_id!r}; "
+                      f"assert c.RELEASE_OPEN_AT == g.DEFAULT_CONFIG['release_open_at'] == {profile['release_open_at']!r}; "
+                      f"assert c.ROOM_CATALOG == {profile['room_catalog']!r}; "
+                      "print('GUI/Core/Profile/Tk import OK')")
+        check = subprocess.run([str(python), "-B", "-c", check_code], cwd=staged_source.parent, env=env)
+        if check.returncode:
+            raise RuntimeError(f"{profile['label']} 界面与预约核心导入失败。请检查源码及模块兼容性；新增库请填写extra_dependencies。")
+    outputs = []
+    for index, profile in enumerate(profiles, 1):
+        profile_id = profile["id"]
+        staged_source, staged_gui = staged[profile_id]
+        region_settings = dict(settings, profile_id=profile_id)
+        out(f"\n[打包进度] {index}/{len(profiles)}：{profile['label']}")
+        cmd, exe = build_command(python, region_settings, staged_gui, staged_source)
+        out(f"[目标EXE] {exe}")
+        out(f"[源码SHA256] {sha256(source)}（此源码会进入本次EXE）")
+        run_packager(cmd, workdir=staged_source.parent)
+        # 授权文件由管理员独立分发，构建过程不读取、生成或覆盖任何授权JSON。
+        smoke_test(exe)
+        subprocess.run([str(python), str(ROOT / "tools" / "verify_embedded.py"),
+                        "--profile", profile_id], cwd=ROOT, check=True)
+        outputs.append(exe)
+        out(f"[完成] {profile['label']} 已打包并通过启动、内嵌代码自检")
     out("\n============================================================")
-    out("[SUCCESS] 已打包并通过启动自检")
-    out(f"[EXE] {exe}")
-    out(f"[EXE SHA256] {sha256(exe)}")
+    out(f"[SUCCESS] 已打包并通过自检：{len(outputs)}套区域")
+    for exe in outputs:
+        out(f"[EXE] {exe}")
+        out(f"[EXE SHA256] {sha256(exe)}")
     out("[提示] Tk启动及模块导入已验证；会议室网页自动操作仍需在目标电脑模拟测试")
     out("============================================================")
     return 0

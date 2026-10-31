@@ -1,4 +1,4 @@
-同一项目，选择区域打包
+同一项目，选择单个区域或全部打包
 
 固定位置
 源码：D:\05 AI脚本\PythonProject\网页操作\MeetingRoomAutoBooking\项目源码
@@ -7,23 +7,25 @@
 
 打包步骤
 1. 在“项目源码”中双击“一键打包EXE.cmd”。
-2. 输入1选择 F5 / F5-1A，或输入2选择 H7；输入Q取消。
+2. 输入1选择 F5 / F5-1A、输入2选择 H7、输入3选择华电B2，输入4选择全部打包；输入Q取消。
 3. 等待构建、窗口启动自检和嵌入代码核对全部成功。
-4. 从所选目录取出EXE；首次分发时另附管理员提供的“账号授权.json”：
+4. 从对应目录取出EXE；首次分发时另附管理员提供的“账号授权.json”：
    dist\F5\会议室自动抢订_F5.exe
    dist\H7\会议室自动抢订_H7.exe
-文件名固定，后续构建更新所选区域产物；不要向使用者分发源码、构建暂存文件、管理员工具或私钥。
+   dist\B2a\会议室自动抢订_B2a.exe
+全部打包依次生成上述三份EXE，每份都要通过启动和内嵌代码自检。文件名固定，后续构建更新对应区域产物；不要向使用者分发源码、构建暂存文件、管理员工具或私钥。
 打包及构建校验不需要源码目录中的“账号授权.json”，不会生成、复制或覆盖授权文件。
 更新程序时只替换EXE，保留使用者已有的授权JSON；名单变更时另用授权管理工具签发、分发。
 
 区域配置
 F5程序：F5 3间，提前7天；F5-1A 13间，提前3天；默认08:30:00放号。
 H7程序：东莞(DongGuan) → 溪流背坡村(XLBPC) → H7；15间，提前7天；默认08:45:00放号。
+B2a程序：深圳(Shenzhen) → B → 华电B2；指定4间，提前7天；默认08:30:00放号。
 运行界面可以设置放号时间，已保存的本区域设置会保留。
 
 管理员维护
-两套城市、园区、楼栋、房号、行号、提前天数和默认放号时间统一在 deployment_profiles.py 中维护。
-修改 PROFILES 下相应区域后重新打包；两区域共用同一套预约逻辑。
+各套城市、园区、楼栋、房号、行号、提前天数和默认放号时间统一在 deployment_profiles.py 中维护。
+修改 PROFILES 下相应区域后重新打包；各区域共用同一套预约逻辑。
 rooms 填写楼栋查询后的完整名单，行号按实际网页顺序从1连续排列，expected_counts 同步填写数量。
 这些行号用于核验管理员配置身份，运行时根据唯一房名及实际纵坐标选格。
 不同账号只看到部分预置房间时，无需删改统一名单或重排行号；查询目标楼栋后仅操作当前可见房间。
@@ -33,20 +35,24 @@ rooms 填写楼栋查询后的完整名单，行号按实际网页顺序从1连�
 
 源码与构建输入
 会议室预定.py 是主核心源码，booking_core.py 是同步副本，会议室自动抢订_GUI.py 是界面入口。
-源码运行默认使用F5配置；区域构建输入分别生成在 build\region_sources\F5 和 H7。
+源码运行默认使用F5配置；区域构建输入分别生成在 build\region_sources\F5、H7 和 B2a。
 每个EXE只编入对应区域配置，不需要维护两份预约源码。
 
 命令行用法
 python build_exe.py --profile F5
 python build_exe.py --profile H7
+python build_exe.py --profile B2a
+python build_exe.py --profile all
 python build_exe.py --profile F5 --check
 python build_exe.py --profile H7 --check
+python build_exe.py --profile all --check
 --check 仅核验配置、同步源码并准备构建输入，不生成EXE。
 
 数据与授权
 F5数据保存在 %LOCALAPPDATA%\MeetingRoomAutoBooking。
 H7数据保存在 %LOCALAPPDATA%\MeetingRoomAutoBooking\H7。
-两区域任务、登录资料和日志独立；切换区域需核对并设置对应任务。
+B2a数据保存在 %LOCALAPPDATA%\MeetingRoomAutoBooking\B2a。
+各区域任务、登录资料和日志独立；切换区域需核对并设置对应任务。
 继续使用原有签名授权，管理员通过外层“授权管理”目录中的“账号授权管理.exe”维护名单。
 名单变更后重新签发授权文件，无需重新构建预约程序；既有公钥和私钥应保持配套。
 
