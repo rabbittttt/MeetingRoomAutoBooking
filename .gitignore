@@ -52,3 +52,6 @@ env/
 .idea/
 .vscode/
 *.iml
+
+# Local update helper.
+update_script.bat
