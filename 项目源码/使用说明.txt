@@ -1,8 +1,8 @@
 会议室自动抢订使用说明
 
-项目位置
-源码：D:\05 AI脚本\PythonProject\网页操作\MeetingRoomAutoBooking\项目源码
-授权管理：D:\05 AI脚本\PythonProject\网页操作\MeetingRoomAutoBooking\授权管理
+项目位置（相对于包含 AGENTS.md 的 MeetingRoomAutoBooking 项目根目录）
+源码：项目源码
+授权管理：授权管理
 后续在同一项目修改、打包，不新建版本目录，不默认生成ZIP。
 
 启动与设置

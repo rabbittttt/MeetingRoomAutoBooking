@@ -52,7 +52,7 @@ W3本机备用登录
 本次更新仅修改源码；已有EXE须重新打包才会包含此修复。
 
 项目位置与产物
-源码固定在 D:\05 AI脚本\PythonProject\网页操作\MeetingRoomAutoBooking\项目源码。
+源码位于项目根目录（包含 AGENTS.md 的 MeetingRoomAutoBooking 目录）下的“项目源码”。
 授权管理固定在同级“授权管理”目录，继续使用“账号授权管理.exe”和原有签名密钥。
 在同一项目持续维护，打包时选择 F5 / F5-1A 或 H7，不默认生成ZIP。
 产物名称固定为“会议室自动抢订_F5.exe”和“会议室自动抢订_H7.exe”。

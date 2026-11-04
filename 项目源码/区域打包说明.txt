@@ -1,8 +1,8 @@
 同一项目，选择单个区域或全部打包
 
-固定位置
-源码：D:\05 AI脚本\PythonProject\网页操作\MeetingRoomAutoBooking\项目源码
-授权管理：D:\05 AI脚本\PythonProject\网页操作\MeetingRoomAutoBooking\授权管理
+目录位置（相对于包含 AGENTS.md 的 MeetingRoomAutoBooking 项目根目录）
+源码：项目源码
+授权管理：授权管理
 在同一项目中持续修改，无需复制项目，不默认生成ZIP。
 
 打包步骤
