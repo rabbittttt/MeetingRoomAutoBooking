@@ -43,7 +43,6 @@ DEFAULTS = {
     "module_paths": [],
 }
 GENERATED_CORE = ROOT / "booking_core.py"
-BUILD_ENV = ROOT / ".packaging_env"
 
 
 def out(message: str) -> None:
@@ -233,65 +232,28 @@ def deps_ok(python: Path) -> bool:
 
 
 def candidate_pythons():
-    items: list[Path] = []
-    win_executable = "Scripts/python.exe" if os.name == "nt" else "bin/python"
-    items.append(BUILD_ENV / win_executable)
-    items.append(Path(sys.executable))
-    items.append(Path(sys.base_prefix) / ("python.exe" if os.name == "nt" else "bin/python3"))
-    for ancestor in [ROOT, *ROOT.parents[:4]]:
-        items.append(ancestor / ".venv" / win_executable)
-    if os.name == "nt":
-        try:
-            proc = subprocess.run(["py", "-0p"], stdout=subprocess.PIPE,
-                                  stderr=subprocess.DEVNULL, text=True, errors="replace", timeout=10)
-            for match in re.findall(r"[A-Za-z]:\\[^\r\n]*?python(?:w)?\.exe", proc.stdout, flags=re.I):
-                items.append(Path(match.strip().strip('"')))
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-    seen = set()
-    for item in items:
-        key = str(item).lower()
-        if key not in seen and item.is_file():
-            seen.add(key)
-            yield item
+    configured = os.environ.get("BOOKING_PYTHON")
+    if configured:
+        executable = Path(os.path.expandvars(configured)).expanduser()
+        if not executable.is_absolute():
+            executable = ROOT / executable
+    else:
+        workspace = next((p for p in (ROOT, *ROOT.parents) if p.name.lower() == "project"), None)
+        if workspace is None:
+            raise RuntimeError("找不到 Project 工作区。请保持项目位于 Project 内，并初始化共享 .venv。")
+        executable = workspace / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if not executable.is_file():
+        raise RuntimeError(f"共享 Python 不存在：{executable}。请初始化 Project/.venv。")
+    yield executable.resolve()
 
-
-def create_build_environment(base_python: Path) -> Path:
-    exe = BUILD_ENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if exe.exists() and tkinter_ok(exe):
-        return exe
-    if BUILD_ENV.exists():
-        out("[环境] 删除损坏的专用构建环境并重新建立")
-        shutil.rmtree(BUILD_ENV)
-    out(f"[环境] 使用 {base_python} 创建独立打包环境")
-    subprocess.run([str(base_python), "-m", "venv", str(BUILD_ENV)], check=True)
-    if not tkinter_ok(exe):
-        raise RuntimeError("专用打包环境中 tkinter/Tcl 不可用，请在 Python 安装程序中启用 tcl/tk and IDLE")
-    return exe
 
 
 def select_build_python() -> Path:
-    candidates = list(candidate_pythons())
-    out(f"[环境] 检测Python解释器：{len(candidates)}个候选")
-    suitable: list[Path] = []
-    build_env_python = (BUILD_ENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")).resolve()
-    for candidate in candidates:
-        if tkinter_ok(candidate):
-            if deps_ok(candidate):
-                out(f"[环境] 复用已具备Tk/Tcl、Playwright、PyInstaller的Python：{candidate}")
-                return candidate
-            # .packaging_env 若缺依赖会被下面的 create_build_environment 删除重建，
-            # 不能把它自己作为新环境的基础解释器。
-            try:
-                is_build_env = candidate.resolve() == build_env_python
-            except OSError:
-                is_build_env = False
-            if not is_build_env:
-                suitable.append(candidate)
-    if not suitable:
-        raise RuntimeError("未找到能启动 tkinter 窗口的 Python。请在完整的 Windows Python 安装器中选择 Modify -> tcl/tk and IDLE，再重新打包。不要执行 pip install tkinter。")
-    # 不往用户系统Python中强装包，专门创建可复用的打包环境。
-    return create_build_environment(suitable[0])
+    candidate = next(candidate_pythons())
+    if not tkinter_ok(candidate):
+        raise RuntimeError(f"共享 Python 的 tkinter/Tcl 不可用：{candidate}。请修复其基础 Python 的 tcl/tk and IDLE 组件；不要 pip install tkinter。")
+    out(f"[环境] 使用 Project 共享 Python：{candidate}")
+    return candidate
 
 
 def modules_missing(python: Path, modules: list[str]) -> list[str]:

@@ -12,12 +12,14 @@ Windows 会议室预约工具，支持到点抢订、每周固定任务及空闲
 
 电脑需安装 Google Chrome，并能访问公司的会议室系统。
 
-在 `项目源码` 中运行 `一键打包EXE.cmd`，选择所需区域；也可使用：
+默认从启动脚本位置向上查找名为 `Project` 的工作区，并统一使用 `Project/.venv`；不再优先 `.packaging_env`、子项目 `.venv` 或系统 Python。Project 上一级位置可任意改变。迁机后在 Project 根目录重新初始化共享环境，不要复制旧 `.venv`。显式 `BOOKING_PYTHON` 仍可覆盖，相对值按 `项目源码` 目录解析。
+
+在 `项目源码` 中运行 `启动会议室预定.cmd` 启动源码界面，运行 `一键打包EXE.cmd` 选择构建区域；也可使用：
 
 ```powershell
-python build_exe.py --profile F5
-python build_exe.py --profile H7
-python build_exe.py --profile B2a
+.\run-project.ps1 build_exe.py --profile F5
+.\run-project.ps1 build_exe.py --profile H7
+.\run-project.ps1 build_exe.py --profile B2a
 ```
 
 区域资料在 `项目源码/deployment_profiles.py` 维护。普通使用者可勾选预置会议室。
