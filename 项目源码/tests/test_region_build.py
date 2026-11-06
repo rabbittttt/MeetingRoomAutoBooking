@@ -30,6 +30,7 @@ import booking_profile
 import build_info
 import w3_credentials
 import w3_login
+import desktop_lifecycle
 gui = importlib.import_module(sys.argv[1])
 snapshot = {
     "deployment_id": core.DEPLOYMENT_ID,
@@ -51,6 +52,8 @@ snapshot = {
     "gui_path": str(Path(gui.__file__).resolve()),
     "core_hash": gui.CORE_SHA256,
     "runtime_hashes": build_info.RUNTIME_SHA256,
+    "asset_hashes": build_info.ASSET_SHA256,
+    "icon_path": str(desktop_lifecycle.APP_ICON_PATH.resolve()),
     "w3_paths": {module.__name__: str(Path(module.__file__).resolve())
                  for module in (w3_credentials, w3_login)},
 }
@@ -90,6 +93,11 @@ class RegionBuildTests(unittest.TestCase):
         # 只读取正式运行模块；管理员模块使用自造标记，绝不读取管理员私钥。
         for filename in build_exe.RUNTIME_MODULES:
             (self.build_root / filename).write_bytes((ROOT / filename).read_bytes())
+        for filename in build_exe.RUNTIME_ASSETS:
+            destination = self.build_root / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes((ROOT / filename).read_bytes())
+        (self.build_root / "assets" / "source-only.png").write_bytes(b"not-a-runtime-asset")
         (self.build_root / "deployment_profiles.py").write_text(
             "ALL_DEPLOYMENTS_MUST_NOT_SHIP = True\n", encoding="utf-8")
         (self.build_root / "license_admin.py").write_text(
@@ -144,6 +152,8 @@ class RegionBuildTests(unittest.TestCase):
                 self.assertEqual(actual["gui_tasks"], [[], [], []])
                 self.assertEqual(actual["core_hash"], build_exe.sha256(self.source))
                 self.assertEqual(actual["runtime_hashes"], build_exe.runtime_module_hashes(source.parent))
+                self.assertEqual(actual["asset_hashes"], build_exe.runtime_asset_hashes(source.parent))
+                self.assertEqual(Path(actual["icon_path"]), (source.parent / "assets" / "app_icon.ico").resolve())
                 self.assertEqual(actual["w3_paths"], {
                     name: str((source.parent / f"{name}.py").resolve())
                     for name in ("w3_credentials", "w3_login")})
@@ -164,9 +174,12 @@ class RegionBuildTests(unittest.TestCase):
         for profile_id in ("F5", "H7", "B2a"):
             with self.subTest(profile_id=profile_id):
                 source, gui = self.stage(profile_id)
-                expected_files = set(build_exe.RUNTIME_MODULES) | {
+                expected_files = set(build_exe.RUNTIME_MODULES) | set(build_exe.RUNTIME_ASSETS) | {
                     "booking_core.py", "booking_profile.py", "build_info.py", gui.name}
-                self.assertEqual({p.name for p in source.parent.iterdir()}, expected_files)
+                self.assertEqual({p.relative_to(source.parent).as_posix()
+                                  for p in source.parent.rglob("*") if p.is_file()}, expected_files)
+                self.assertEqual((source.parent / "assets" / "app_icon.ico").read_bytes(),
+                                 (ROOT / "assets" / "app_icon.ico").read_bytes())
                 for name in ("w3_credentials.py", "w3_login.py"):
                     self.assertIn(name, expected_files)
                     self.assertEqual((source.parent / name).read_bytes(), (ROOT / name).read_bytes())
@@ -206,6 +219,9 @@ class RegionBuildTests(unittest.TestCase):
             self.assertEqual(command[command.index("--distpath") + 1], str(self.build_root / "dist" / profile_id))
             self.assertEqual(command[command.index("--workpath") + 1], str(self.build_root / "build" / "pyinstaller" / profile_id))
             self.assertEqual(command[command.index("--specpath") + 1], str(self.build_root / "build" / "specs" / profile_id))
+            icon = source.parent / "assets" / "app_icon.ico"
+            self.assertEqual(command[command.index("--icon") + 1], str(icon))
+            self.assertIn(f"{icon}{os.pathsep}assets", command)
             self.assertEqual(output, self.build_root / "dist" / profile_id / f"会议室自动抢订_{profile_id}.exe")
             imports = [command[index + 1] for index, value in enumerate(command) if value == "--hidden-import"]
             self.assertIn("booking_profile", imports)

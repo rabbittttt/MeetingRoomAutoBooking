@@ -43,6 +43,10 @@ class BuildAuthorizationTests(unittest.TestCase):
         self.gui.write_text("TITLE = '离线构建夹具'\n", encoding="utf-8")
         for filename in build_exe.RUNTIME_MODULES:
             (self.root / filename).write_text(f"MODULE_NAME = {filename!r}\n", encoding="utf-8")
+        for filename in build_exe.RUNTIME_ASSETS:
+            destination = self.root / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"synthetic-icon-test-bytes")
         self.output = self.root / "dist" / "H7" / "会议室自动抢订_H7.exe"
         self.source_license = self.root / LICENSE_NAME
         self.output_license = self.output.parent / LICENSE_NAME
@@ -214,7 +218,8 @@ class BuildAuthorizationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "W3 本机凭据"):
                     build_exe.build_command(Path(sys.executable), settings, self.gui, self.source)
 
-    def fake_archive(self, stage, gui, *, tamper_module=None, credential_file=None):
+    def fake_archive(self, stage, gui, *, tamper_module=None, credential_file=None,
+                     tamper_asset=False, missing_asset=False):
         payloads = {
             name: compile((stage / f"{name}.py").read_text(encoding="utf-8"),
                           f"embedded/{name}.py", "exec", dont_inherit=True)
@@ -225,10 +230,15 @@ class BuildAuthorizationTests(unittest.TestCase):
         gui_code = compile(gui.read_text(encoding="utf-8"), "embedded/gui.py", "exec",
                            dont_inherit=True)
         pyz = types.SimpleNamespace(toc=dict.fromkeys(payloads), extract=payloads.__getitem__)
+        data = {name: (b"tampered-icon" if tamper_asset else (stage / name).read_bytes())
+                for name in verify_embedded.RUNTIME_ASSETS if not missing_asset}
+        if credential_file:
+            data[f"local_data/{credential_file}"] = b"credential-marker"
+        data[gui.stem] = marshal.dumps(gui_code)
         archive = types.SimpleNamespace(
-            toc={f"local_data/{credential_file}": None} if credential_file else {},
+            toc=dict.fromkeys(data),
             open_embedded_archive=Mock(return_value=pyz),
-            extract=Mock(return_value=marshal.dumps(gui_code)))
+            extract=Mock(side_effect=data.__getitem__))
         reader = Mock(return_value=archive)
         # 不读取现有 EXE，也不要求测试解释器安装打包器。
         package = types.ModuleType("PyInstaller")
@@ -243,23 +253,28 @@ class BuildAuthorizationTests(unittest.TestCase):
                    "PyInstaller.archive.readers": readers}
         return modules, reader, archive
 
-    def verify(self, *, tamper_module=None, credential_file=None):
+    def verify(self, *, tamper_module=None, credential_file=None,
+               tamper_asset=False, missing_asset=False):
         settings = dict(build_exe.DEFAULTS, profile_id="H7")
         source, gui = build_exe.prepare_build_sources(
             settings, self.source, self.gui, get_profile("H7"))
         self.output.parent.mkdir(parents=True, exist_ok=True)
         self.output.write_bytes(b"MZ-local-test-output")
         modules, reader, archive = self.fake_archive(
-            source.parent, gui, tamper_module=tamper_module, credential_file=credential_file)
+            source.parent, gui, tamper_module=tamper_module, credential_file=credential_file,
+            tamper_asset=tamper_asset, missing_asset=missing_asset)
         with patch.dict(sys.modules, modules):
             report = verify_embedded.verify_build(self.output, source.parent, gui, "H7")
         reader.assert_called_once_with(str(self.output.resolve()))
         archive.open_embedded_archive.assert_called_once_with("PYZ.pyz")
-        archive.extract.assert_called_once_with(gui.stem)
+        self.assertEqual([call.args[0] for call in archive.extract.call_args_list],
+                         [*verify_embedded.RUNTIME_ASSETS, gui.stem])
         self.assertTrue(report["successful"])
         self.assertTrue(report["authorization_managed_separately"])
         self.assertTrue(report["w3_credentials_file_absent"])
         self.assertEqual(report["runtime_sha256"], build_exe.runtime_module_hashes(source.parent))
+        self.assertEqual(report["asset_sha256"], build_exe.runtime_asset_hashes(source.parent))
+        self.assertEqual(report["embedded_assets_match"], list(build_exe.RUNTIME_ASSETS))
         self.assertIn("w3_credentials", report["embedded_modules_match"])
         self.assertIn("w3_login", report["embedded_modules_match"])
         self.assertNotIn("external_license_matches", report)
@@ -304,6 +319,27 @@ class BuildAuthorizationTests(unittest.TestCase):
         self.output.write_bytes(b"MZ-local-test-output")
         with self.assertRaisesRegex(ValueError, "运行模块 SHA256"):
             verify_embedded.verify_build(self.output, source.parent, gui, "H7")
+
+    def test_embedded_verification_rejects_changed_or_missing_icon(self):
+        with self.assertRaisesRegex(ValueError, "内嵌图标素材.*不一致"):
+            self.verify(tamper_asset=True)
+        with self.assertRaisesRegex(ValueError, "缺少内嵌图标素材"):
+            self.verify(missing_asset=True)
+
+    def test_embedded_verification_rejects_stale_icon_hash(self):
+        source, gui = build_exe.prepare_build_sources(
+            dict(build_exe.DEFAULTS, profile_id="H7"), self.source, self.gui, get_profile("H7"))
+        (source.parent / "assets" / "app_icon.ico").write_bytes(b"changed-after-staging")
+        self.output.parent.mkdir(parents=True, exist_ok=True)
+        self.output.write_bytes(b"MZ-local-test-output")
+        with self.assertRaisesRegex(ValueError, "图标素材 SHA256"):
+            verify_embedded.verify_build(self.output, source.parent, gui, "H7")
+
+    def test_missing_source_icon_stops_staging(self):
+        (self.root / "assets" / "app_icon.ico").unlink()
+        with self.assertRaisesRegex(FileNotFoundError, "缺少程序图标素材"):
+            build_exe.prepare_build_sources(dict(build_exe.DEFAULTS, profile_id="H7"),
+                                            self.source, self.gui, get_profile("H7"))
 
     def test_embedded_verification_rejects_packaged_w3_credentials_without_reading_them(self):
         with self.assertRaisesRegex(ValueError, "W3 本机凭据文件"):

@@ -25,6 +25,7 @@ RUNTIME_MODULES = (
 HASHED_RUNTIME_MODULES = tuple(name for name in RUNTIME_MODULES
                                if name not in {"booking_core", "booking_profile", "build_info"})
 FORBIDDEN_MODULES = ("license_admin", "deployment_profiles")
+RUNTIME_ASSETS = ("assets/app_icon.ico",)
 
 
 def normalized(value):
@@ -75,7 +76,8 @@ def verify_build(exe: Path, stage: Path, gui: Path, profile_id: str) -> dict:
     report_path = exe.parent / "构建校验.json"
     # 新构建核验失败时不能留下旧的“通过”报告。
     report_path.unlink(missing_ok=True)
-    for path in (exe, staged_gui, *(stage / f"{name}.py" for name in RUNTIME_MODULES)):
+    for path in (exe, staged_gui, *(stage / f"{name}.py" for name in RUNTIME_MODULES),
+                 *(stage / name for name in RUNTIME_ASSETS)):
         if not path.is_file():
             raise FileNotFoundError(f"构建校验缺少必要文件：{path}")
     with exe.open("rb") as stream:
@@ -84,8 +86,9 @@ def verify_build(exe: Path, stage: Path, gui: Path, profile_id: str) -> dict:
     core_hash = digest(stage / "booking_core.py")
     profile_hash = digest(stage / "booking_profile.py")
     runtime_hashes = {name: digest(stage / f"{name}.py") for name in HASHED_RUNTIME_MODULES}
+    asset_hashes = {name: digest(stage / name) for name in RUNTIME_ASSETS}
     info = literal_assignments(stage / "build_info.py", {
-        "CORE_SHA256", "DEPLOYMENT_ID", "PROFILE_SHA256", "RUNTIME_SHA256",
+        "CORE_SHA256", "DEPLOYMENT_ID", "PROFILE_SHA256", "RUNTIME_SHA256", "ASSET_SHA256",
     })
     profile = literal_assignments(stage / "booking_profile.py", {"PROFILE"})["PROFILE"]
     if not isinstance(profile, dict) or profile.get("id") != profile_id or info["DEPLOYMENT_ID"] != profile_id:
@@ -94,6 +97,8 @@ def verify_build(exe: Path, stage: Path, gui: Path, profile_id: str) -> dict:
         raise ValueError("暂存构建信息的源码/区域配置 SHA256 与实际文件不一致")
     if info["RUNTIME_SHA256"] != runtime_hashes:
         raise ValueError("暂存构建信息的运行模块 SHA256 与实际文件不一致")
+    if info["ASSET_SHA256"] != asset_hashes:
+        raise ValueError("暂存构建信息的图标素材 SHA256 与实际文件不一致")
 
     # 使用调用者选择的打包解释器执行 CLI；普通导入本工具不要求已安装 PyInstaller。
     from PyInstaller.archive.readers import CArchiveReader
@@ -103,6 +108,13 @@ def verify_build(exe: Path, stage: Path, gui: Path, profile_id: str) -> dict:
     if any(name == "w3_credentials.dat" or name.startswith("w3_credentials.dat.")
            for name in archived_names):
         raise ValueError("EXE 意外包含 W3 本机凭据文件，禁止分发")
+    archive_assets = {str(name).replace("\\", "/"): name for name in archive.toc}
+    for name in RUNTIME_ASSETS:
+        if name not in archive_assets:
+            raise ValueError(f"EXE 缺少内嵌图标素材：{name}")
+        actual = archive.extract(archive_assets[name])
+        if not isinstance(actual, bytes) or hashlib.sha256(actual).hexdigest() != asset_hashes[name]:
+            raise ValueError(f"EXE 内嵌图标素材与暂存文件不一致：{name}")
     pyz = archive.open_embedded_archive("PYZ.pyz")
     forbidden = [name for name in pyz.toc if any(
         name == module or name.startswith(module + ".") for module in FORBIDDEN_MODULES)]
@@ -128,7 +140,8 @@ def verify_build(exe: Path, stage: Path, gui: Path, profile_id: str) -> dict:
         deployment_profiles_module_absent=True, authorization_managed_separately=True,
         exe=str(exe), stage=str(stage), exe_bytes=exe.stat().st_size,
         core_sha256=core_hash, profile_sha256=profile_hash, exe_sha256=digest(exe),
-        runtime_sha256=runtime_hashes, w3_credentials_file_absent=True,
+        runtime_sha256=runtime_hashes, asset_sha256=asset_hashes,
+        embedded_assets_match=list(RUNTIME_ASSETS), w3_credentials_file_absent=True,
     )
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report

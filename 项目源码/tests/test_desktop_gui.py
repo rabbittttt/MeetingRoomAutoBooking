@@ -1,5 +1,7 @@
 """桌面后台运行回归；使用真实Tk，启动项和系统托盘全部替换为模拟。"""
 import copy
+import ctypes
+from ctypes import wintypes
 import os
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -41,6 +43,7 @@ class DesktopGUITests(unittest.TestCase):
                 self.assertEqual(app.get_config()["start_with_windows"], enabled)
                 self.assertIsNone(app.thread)
                 self.assertFalse(app.is_running())
+                self.assertEqual(app.desktop_exit_button.winfo_manager(), "")
                 app._finish_exit()
 
     def test_close_keeps_worker_running_and_tray_show_restores_window(self):
@@ -68,6 +71,17 @@ class DesktopGUITests(unittest.TestCase):
         self.assertEqual(root.state(), "normal")
         warning.assert_called_once()
         desktop.close.assert_not_called()
+        self.assertEqual(app.desktop_exit_button.winfo_manager(), "pack")
+
+    def test_exit_fallback_appears_only_while_tray_is_unavailable(self):
+        root, app, desktop, manager = self.make_app()
+        self.assertEqual(app.desktop_exit_button.winfo_manager(), "")
+        desktop.tray_available = False
+        app._drain_queue()
+        self.assertEqual(app.desktop_exit_button.winfo_manager(), "pack")
+        desktop.tray_available = True
+        app._drain_queue()
+        self.assertEqual(app.desktop_exit_button.winfo_manager(), "")
 
     def test_exit_waits_for_worker_completion_and_then_removes_tray(self):
         root, app, desktop, manager = self.make_app()
@@ -146,13 +160,22 @@ class NativeDesktopGUITests(unittest.TestCase):
         self.assertTrue(session.acquire())
         root = gui.tk.Tk()
         root.withdraw()
-        app = gui.BookingGUI(root, config_override=copy.deepcopy(gui.DEFAULT_CONFIG),
-                             check_credentials=False, desktop_session=session)
+        with patch.object(root, "iconbitmap", wraps=root.iconbitmap) as set_icon:
+            app = gui.BookingGUI(root, config_override=copy.deepcopy(gui.DEFAULT_CONFIG),
+                                 check_credentials=False, desktop_session=session)
+        set_icon.assert_any_call(str(gui.APP_ICON_PATH))
         self.addCleanup(app._finish_exit)
         root.deiconify()
         app._select_tab("advanced")
         root.update()
         self.assertTrue(session.tray_available, session.last_error)
+        self.assertTrue(session._tray._owned_icon, "托盘没有加载应用图标")
+        hwnd = app._window_frame._windows_shell().handle(root)
+        get_icon = session._api.user.SendMessageW
+        get_icon.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        get_icon.restype = ctypes.c_ssize_t
+        self.assertTrue(get_icon(hwnd, 0x007F, 1, 0), "窗口没有设置Windows大图标")
+        self.assertTrue(get_icon(hwnd, 0x007F, 0, 0), "窗口没有设置Windows小图标")
         self.assertIsNone(app.thread)
         app.on_close()
         self.assertEqual(root.state(), "withdrawn")

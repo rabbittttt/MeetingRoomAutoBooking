@@ -22,7 +22,7 @@ from tkinter import font as tkfont
 
 import booking_core as core
 import w3_credentials
-from desktop_lifecycle import DesktopSession, StartupManager
+from desktop_lifecycle import APP_ICON_PATH, DesktopSession, StartupManager
 from window_chrome import BorderlessWindow as WindowsWindowFrame
 
 try:
@@ -498,8 +498,15 @@ class BookingGUI:
         self._desktop_session = desktop_session
         self._startup_manager = startup_manager
         self._tray_ready = False
+        self._desktop_exit_visible = None
         self._exiting = False
         root.title("会议室自动抢订")
+        if sys.platform == "win32":
+            try:
+                root.iconbitmap(default=str(APP_ICON_PATH))
+                root.iconbitmap(str(APP_ICON_PATH))
+            except tk.TclError as exc:
+                logging.warning("程序图标加载失败：%s", exc)
         # 使用 Tk 的逻辑像素，尊重 Windows 125% / 150% DPI 缩放。
         # 16 寸笔记本优先约 1160×750，窄屏和低分屏使用滚动区域。
         screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
@@ -579,6 +586,18 @@ class BookingGUI:
                 self.append_log("开机自启动设置失败，请在高级设置中重试。", logging.WARNING)
         else:
             self.desktop_status_var.set("系统设置仅在正常启动程序时应用")
+        self._update_desktop_controls()
+
+    def _update_desktop_controls(self):
+        visible = not (self._tray_ready and self._desktop_session is not None
+                       and self._desktop_session.tray_available)
+        if visible == self._desktop_exit_visible:
+            return
+        self._desktop_exit_visible = visible
+        if visible:
+            self.desktop_exit_button.pack(side="right")
+        else:
+            self.desktop_exit_button.pack_forget()
 
     def _change_startup(self):
         if self._startup_manager is None:
@@ -1217,7 +1236,7 @@ class BookingGUI:
         ChoiceChip(desktop_row, text="开机自启动", variable=self.startup_var,
                    command=self._change_startup, width=145).pack(side="left", padx=(0, 12))
         ttk.Label(desktop_row, textvariable=self.desktop_status_var, style="CardMuted.TLabel").pack(side="left")
-        RoundedActionButton(desktop_row, text="退出程序", command=self.request_exit, width=90).pack(side="right")
+        self.desktop_exit_button = RoundedActionButton(desktop_row, text="退出程序", command=self.request_exit, width=90)
         conn = self.card(tab, "浏览器与认证", "先依次完成新标签认证，之后所有会议室并行填表；不限制同时准备的房间数量。")
         grid = ttk.Frame(conn, style="Card.TFrame")
         grid.pack(fill="x")
@@ -1547,6 +1566,7 @@ class BookingGUI:
         if self._queue_after_id is not None:
             self.root.after_cancel(self._queue_after_id)
             self._queue_after_id = None
+        self._update_desktop_controls()
         if self._desktop_session is not None:
             for action in self._desktop_session.drain_actions():
                 if action == "show":

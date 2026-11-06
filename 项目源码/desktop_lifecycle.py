@@ -16,6 +16,7 @@ import threading
 
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+APP_ICON_PATH = Path(__file__).resolve().parent / "assets" / "app_icon.ico"
 
 
 def _profile_name(profile_id: str) -> str:
@@ -134,6 +135,10 @@ class _WinAPI:
             (self.user, "TranslateMessage", [ctypes.POINTER(MSG)], wintypes.BOOL),
             (self.user, "DispatchMessageW", [ctypes.POINTER(MSG)], ctypes.c_ssize_t),
             (self.user, "LoadIconW", [wintypes.HINSTANCE, ctypes.c_void_p], wintypes.HICON),
+            (self.user, "LoadImageW", [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
+             ctypes.c_int, ctypes.c_int, wintypes.UINT], wintypes.HICON),
+            (self.user, "GetSystemMetrics", [ctypes.c_int], ctypes.c_int),
+            (self.user, "DestroyIcon", [wintypes.HICON], wintypes.BOOL),
             (self.user, "CreatePopupMenu", [], wintypes.HMENU),
             (self.user, "AppendMenuW", [wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR], wintypes.BOOL),
             (self.user, "DestroyMenu", [wintypes.HMENU], wintypes.BOOL),
@@ -245,6 +250,7 @@ class _NativeTray:
         self._thread = threading.Thread(target=self._run, name="meetingroom-tray", daemon=True)
         self._callback = self.api.WNDPROC(self._window_proc)
         self._data = None
+        self._owned_icon = None
         self._retries = 0
         self._taskbar_created = self.api.user.RegisterWindowMessageW("TaskbarCreated")
 
@@ -347,8 +353,11 @@ class _NativeTray:
             data.hWnd, data.uID = self.hwnd, 1
             data.uFlags = 1 | 2 | 4 | 0x80  # MESSAGE | ICON | TIP | SHOWTIP
             data.uCallbackMessage = self.CALLBACK
-            # Shared Windows icon: LoadIcon resources must not be DestroyIcon'd.
-            data.hIcon = user.LoadIconW(None, ctypes.c_void_p(32512))
+            if APP_ICON_PATH.is_file():
+                self._owned_icon = user.LoadImageW(None, str(APP_ICON_PATH), 1,
+                    max(16, user.GetSystemMetrics(49)), max(16, user.GetSystemMetrics(50)), 0x10)
+            # File-loaded icons belong to this thread; the emergency system icon is shared.
+            data.hIcon = self._owned_icon or user.LoadIconW(None, ctypes.c_void_p(32512))
             data.szTip = self.session.label[:127]
             self._data = data
             if not data.hIcon or not self._add_icon():
@@ -372,6 +381,9 @@ class _NativeTray:
             self.available = False
             if self._data is not None:
                 self.api.shell.Shell_NotifyIconW(2, ctypes.byref(self._data))
+            if self._owned_icon:
+                user.DestroyIcon(self._owned_icon)
+                self._owned_icon = None
             if self.hwnd:
                 user.DestroyWindow(self.hwnd)
                 self.hwnd = None
