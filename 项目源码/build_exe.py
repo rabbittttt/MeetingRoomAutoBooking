@@ -209,22 +209,26 @@ def choose_profile() -> str:
 
 
 def python_command(python: Path, code: str, *, timeout: int = 15) -> tuple[bool, str]:
+    env = os.environ.copy()
+    env.update(PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     try:
         p = subprocess.run([str(python), "-c", code], stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, timeout=timeout, text=True,
-                           errors="replace")
+                           stderr=subprocess.STDOUT, timeout=timeout, encoding="utf-8",
+                           errors="replace", env=env)
         return (p.returncode == 0, p.stdout.strip())
     except (OSError, subprocess.TimeoutExpired) as e:
         return (False, f"{type(e).__name__}: {e}")
 
 
-def tkinter_ok(python: Path) -> bool:
+def check_tkinter(python: Path) -> tuple[bool, str]:
     script = (
+        "import sys; print('Python:', sys.executable, flush=True); "
+        "print('Base Python:', sys.base_prefix, flush=True); "
         "import tkinter as t; "
         "root=t.Tk(); root.withdraw(); root.update_idletasks(); root.destroy(); "
         "print('Tkinter OK')"
     )
-    return python_command(python, script, timeout=20)[0]
+    return python_command(python, script, timeout=20)
 
 
 def deps_ok(python: Path) -> bool:
@@ -251,8 +255,11 @@ def candidate_pythons():
 
 def select_build_python() -> Path:
     candidate = next(candidate_pythons())
-    if not tkinter_ok(candidate):
-        raise RuntimeError(f"共享 Python 的 tkinter/Tcl 不可用：{candidate}。请修复其基础 Python 的 tcl/tk and IDLE 组件；不要 pip install tkinter。")
+    ok, detail = check_tkinter(candidate)
+    if not ok:
+        raise RuntimeError(f"共享 Python 的 Tk 窗口自检失败：{candidate}\n"
+                           f"[Tk自检原始输出]\n{detail or '子进程未返回诊断文字'}\n"
+                           "请根据原始错误检查此电脑的基础 Python/Tcl/Tk；不要 pip install tkinter。")
     out(f"[环境] 使用 Project 共享 Python：{candidate}")
     return candidate
 

@@ -81,7 +81,7 @@ class LauncherPathTests(unittest.TestCase):
 
     def test_builder_selects_only_workspace_python(self):
         self.environment(self.project,'.packaging_env')
-        with patch.object(build_exe,'ROOT',self.project),patch.dict(os.environ,{'BOOKING_PYTHON':''}),patch.object(build_exe,'tkinter_ok',return_value=True):
+        with patch.object(build_exe,'ROOT',self.project),patch.dict(os.environ,{'BOOKING_PYTHON':''}),patch.object(build_exe,'check_tkinter',return_value=(True, 'Tkinter OK')):
             self.assertEqual(list(build_exe.candidate_pythons()),[self.python.resolve()])
             self.assertEqual(build_exe.select_build_python(),self.python.resolve())
 
