@@ -14,6 +14,8 @@ Windows 会议室预约工具，支持到点抢订、每周固定任务及空闲
 
 默认从启动脚本位置向上查找名为 `Project` 的工作区，并统一使用 `Project/.venv`；不再优先 `.packaging_env`、子项目 `.venv` 或系统 Python。Project 上一级位置可任意改变。迁机后在 Project 根目录重新初始化共享环境，不要复制旧 `.venv`。显式 `BOOKING_PYTHON` 仍可覆盖，相对值按 `项目源码` 目录解析。
 
+Windows虚拟环境报“找不到 init.tcl”时，构建器会核对所选Python安装目录中的同版本Tcl/Tk文件，并在本次构建中临时指定目录、重新验证窗口创建。缺少文件时仍须修复基础Python的“tcl/tk and IDLE”组件；构建器不修改系统环境变量。EXE自检不继承这些临时目录。
+
 在 `项目源码` 中运行 `启动会议室预定.cmd` 启动源码界面，运行 `一键打包EXE.cmd` 选择构建区域；也可使用：
 
 ```powershell

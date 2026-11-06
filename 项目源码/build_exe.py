@@ -224,11 +224,49 @@ def check_tkinter(python: Path) -> tuple[bool, str]:
     script = (
         "import sys; print('Python:', sys.executable, flush=True); "
         "print('Base Python:', sys.base_prefix, flush=True); "
+        "print('Version:', sys.version.split()[0], flush=True); "
         "import tkinter as t; "
         "root=t.Tk(); root.withdraw(); root.update_idletasks(); root.destroy(); "
         "print('Tkinter OK')"
     )
     return python_command(python, script, timeout=20)
+
+
+def recover_tkinter_paths(python: Path) -> tuple[bool, str]:
+    """兼容Windows旧版venv的Tcl路径发现问题，只改变当前构建进程环境。"""
+    ok, raw = python_command(python,
+        "import sys,json,_tkinter; print(json.dumps({'base':sys.base_prefix,"
+        "'tcl':_tkinter.TCL_VERSION,'tk':_tkinter.TK_VERSION}))")
+    if not ok:
+        return False, raw
+    try:
+        info = json.loads(raw)
+        base = Path(info["base"])
+        if not base.is_absolute() or any(re.fullmatch(r"\d+\.\d+", info[key]) is None
+                                         for key in ("tcl", "tk")):
+            raise ValueError("无法核验基础Python的Tcl/Tk信息")
+        libraries = {"TCL_LIBRARY": base / "tcl" / ("tcl" + info["tcl"]),
+                     "TK_LIBRARY": base / "tcl" / ("tk" + info["tk"])}
+        required = (libraries["TCL_LIBRARY"] / "init.tcl", libraries["TK_LIBRARY"] / "tk.tcl")
+        missing = [str(path) for path in required if not path.is_file()]
+        if missing:
+            return False, "基础Python缺少以下组件文件，请用其安装程序修复 tcl/tk and IDLE：\n" + "\n".join(missing)
+    except (KeyError, TypeError, ValueError) as exc:
+        return False, f"无法读取基础Python的Tcl/Tk目录：{exc}"
+    previous = {key: os.environ.get(key) for key in libraries}
+    recovered = False
+    try:
+        os.environ.update({key: str(path) for key, path in libraries.items()})
+        recovered, detail = check_tkinter(python)
+        return recovered, ("\n".join(f"{key}={path}" for key, path in libraries.items())
+                           + "\n" + detail)
+    finally:
+        if not recovered:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 def deps_ok(python: Path) -> bool:
@@ -256,6 +294,13 @@ def candidate_pythons():
 def select_build_python() -> Path:
     candidate = next(candidate_pythons())
     ok, detail = check_tkinter(candidate)
+    if not ok and sys.platform == "win32" and "can't find a usable init.tcl" in detail.lower():
+        ok, recovery = recover_tkinter_paths(candidate)
+        if ok:
+            out("[Tk兼容] 已核验并使用基础Python的Tcl/Tk目录，仅本次打包生效")
+            out(recovery)
+        else:
+            detail += "\n[Tcl/Tk目录检查]\n" + recovery
     if not ok:
         raise RuntimeError(f"共享 Python 的 Tk 窗口自检失败：{candidate}\n"
                            f"[Tk自检原始输出]\n{detail or '子进程未返回诊断文字'}\n"
@@ -394,8 +439,12 @@ def smoke_test(exe: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="meeting_build_smoke_") as folder:
         marker = Path(folder) / "tk_result.txt"
         out("[自检] 启动新EXE进行中文GUI、Tk/Tcl及预约参数映射自检")
+        env = os.environ.copy()
+        # 新EXE必须使用自己的内嵌组件，不能借用本次构建临时指定的安装目录。
+        env.pop("TCL_LIBRARY", None)
+        env.pop("TK_LIBRARY", None)
         try:
-            result = subprocess.run([str(exe), "--self-test", str(marker)], timeout=100)
+            result = subprocess.run([str(exe), "--self-test", str(marker)], timeout=100, env=env)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError("EXE启动自检超时：可能是系统安全软件阻止或程序启动卡住") from exc
         if result.returncode != 0 or not marker.is_file():
@@ -404,7 +453,7 @@ def smoke_test(exe: Path) -> None:
             raise RuntimeError("EXE自检标记无效，请勿分发")
 
 
-def main() -> int:
+def build_from_args() -> int:
     parser = argparse.ArgumentParser(description="会议室自动抢订可复用Windows EXE打包工具")
     parser.add_argument("--check", action="store_true", help="只做源码定位与语法检查，不打包")
     parser.add_argument("--sync-only", action="store_true", help="只同步最新会议室预定.py到booking_core.py")
@@ -467,6 +516,18 @@ def main() -> int:
     out("[提示] Tk启动及模块导入已验证；会议室网页自动操作仍需在目标电脑模拟测试")
     out("============================================================")
     return 0
+
+
+def main() -> int:
+    previous = {key: os.environ.get(key) for key in ("TCL_LIBRARY", "TK_LIBRARY")}
+    try:
+        return build_from_args()
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 if __name__ == "__main__":
