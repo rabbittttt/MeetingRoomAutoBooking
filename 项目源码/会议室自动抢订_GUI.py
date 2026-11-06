@@ -22,6 +22,7 @@ from tkinter import font as tkfont
 
 import booking_core as core
 import w3_credentials
+from desktop_lifecycle import DesktopSession, StartupManager
 from window_chrome import BorderlessWindow as WindowsWindowFrame
 
 try:
@@ -79,6 +80,7 @@ DEFAULT_CONFIG = {
     "auth_stagger_seconds": 1.5,
     "verbose_logs": False,
     "step_timing_logs": False,
+    "start_with_windows": True,
 }
 
 
@@ -490,9 +492,13 @@ class W3CredentialsDialog:
 
 class BookingGUI:
     def __init__(self, root: tk.Tk, *, config_override: dict | None = None,
-                 check_credentials: bool = True):
+                 check_credentials: bool = True, desktop_session=None, startup_manager=None):
         self.root = root
         self._check_credentials = check_credentials
+        self._desktop_session = desktop_session
+        self._startup_manager = startup_manager
+        self._tray_ready = False
+        self._exiting = False
         root.title("会议室自动抢订")
         # 使用 Tk 的逻辑像素，尊重 Windows 125% / 150% DPI 缩放。
         # 16 寸笔记本优先约 1160×750，窄屏和低分屏使用滚动区域。
@@ -519,6 +525,8 @@ class BookingGUI:
         self.status_var = tk.StringVar(value="就绪")
         self.verbose_var = tk.BooleanVar(value=False)
         self.timing_var = tk.BooleanVar(value=False)
+        self.startup_var = tk.BooleanVar(value=True)
+        self.desktop_status_var = tk.StringVar(value="")
         self.watch_stop_var = tk.BooleanVar(value=True)
         self.release_type = tk.StringVar(value="单次")
         self.release_date = tk.StringVar(value=date.today().isoformat())
@@ -534,6 +542,7 @@ class BookingGUI:
         self._build()
         self._window_frame = None
         self._frame_update_pending = False
+        self._frame_after_id = None
         self._custom_frame_disabled = False
         self._window_drag = None
         if sys.platform == "win32":
@@ -552,20 +561,63 @@ class BookingGUI:
         except Exception as exc:
             messagebox.showwarning("读取配置失败", f"将使用初始配置。\n{exc}", parent=self.root)
             self.set_config(DEFAULT_CONFIG)
-        self.root.after(140, self._drain_queue)
+        self._initialize_desktop()
+        self._queue_after_id = self.root.after(140, self._drain_queue)
+
+    def _initialize_desktop(self):
+        # 只有正常入口传入系统服务；构建自检和独立GUI测试不创建启动项或托盘。
+        if self._desktop_session is not None:
+            self._tray_ready = self._desktop_session.start_tray()
+            if not self._tray_ready:
+                self.append_log("系统托盘初始化失败，窗口保持打开；可在高级设置中退出程序。", logging.WARNING)
+        if self._startup_manager is not None:
+            try:
+                self._startup_manager.set_enabled(self.startup_var.get())
+                self.desktop_status_var.set("已设置开机自启动" if self.startup_var.get() else "已关闭开机自启动")
+            except OSError:
+                self.desktop_status_var.set("自启动设置未生效，请检查系统权限后重试")
+                self.append_log("开机自启动设置失败，请在高级设置中重试。", logging.WARNING)
+        else:
+            self.desktop_status_var.set("系统设置仅在正常启动程序时应用")
+
+    def _change_startup(self):
+        if self._startup_manager is None:
+            return
+        enabled = self.startup_var.get()
+        try:
+            cfg = load_config()
+            cfg["start_with_windows"] = enabled
+            self._startup_manager.set_enabled(enabled)
+            try:
+                save_config(cfg)
+            except OSError:
+                self._startup_manager.set_enabled(not enabled)
+                raise
+        except (OSError, ValueError):
+            self.startup_var.set(not enabled)
+            self.desktop_status_var.set("保存失败，请重试")
+            messagebox.showerror("自启动设置失败", "无法保存开机自启动设置，请检查本机权限后重试。", parent=self.root)
+            return
+        self.desktop_status_var.set("已设置开机自启动" if enabled else "已关闭开机自启动")
+
+    def show_window(self):
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
 
     def _schedule_window_frame(self, event=None):
-        if self._custom_frame_disabled:
+        if self._custom_frame_disabled or self._exiting:
             return
         if event is not None and event.widget is not self.root:
             return
         if not self._frame_update_pending:
             self._frame_update_pending = True
-            self.root.after_idle(self._apply_window_frame)
+            self._frame_after_id = self.root.after_idle(self._apply_window_frame)
 
     def _apply_window_frame(self):
+        self._frame_after_id = None
         self._frame_update_pending = False
-        if self._custom_frame_disabled:
+        if self._custom_frame_disabled or self._exiting:
             return
         if sys.platform != "win32":
             self._custom_frame_disabled = True
@@ -1159,6 +1211,13 @@ class BookingGUI:
 
     def _build_advanced(self):
         tab = self.tab_advanced.content
+        desktop = self.card(tab, "启动与后台运行", "开机后打开主窗口，请检查设置并点击“保存并开始”。关闭窗口会收起到托盘，正在运行的任务继续。")
+        desktop_row = ttk.Frame(desktop, style="Card.TFrame")
+        desktop_row.pack(fill="x")
+        ChoiceChip(desktop_row, text="开机自启动", variable=self.startup_var,
+                   command=self._change_startup, width=145).pack(side="left", padx=(0, 12))
+        ttk.Label(desktop_row, textvariable=self.desktop_status_var, style="CardMuted.TLabel").pack(side="left")
+        RoundedActionButton(desktop_row, text="退出程序", command=self.request_exit, width=90).pack(side="right")
         conn = self.card(tab, "浏览器与认证", "先依次完成新标签认证，之后所有会议室并行填表；不限制同时准备的房间数量。")
         grid = ttk.Frame(conn, style="Card.TFrame")
         grid.pack(fill="x")
@@ -1284,6 +1343,7 @@ class BookingGUI:
         self.watch_stop_var.set(bool(cfg.get("stop_at_meeting_start", True)))
         self.verbose_var.set(bool(cfg.get("verbose_logs", False)))
         self.timing_var.set(bool(cfg.get("step_timing_logs", False)))
+        self.startup_var.set(bool(cfg.get("start_with_windows", True)))
         self.refresh_room_count()
 
     def get_config(self) -> dict:
@@ -1309,6 +1369,7 @@ class BookingGUI:
             "auth_stagger_seconds": number(self.setting_vars["auth_stagger_seconds"].get(), "认证错峰间隔"),
             "verbose_logs": self.verbose_var.get(),
             "step_timing_logs": self.timing_var.get(),
+            "start_with_windows": self.startup_var.get(),
         }
         # 运行前不修改全局配置；静态校验使用GUI当前勾选的真实会议室。
         if not any(rooms.values()):
@@ -1481,6 +1542,19 @@ class BookingGUI:
         return self.thread is not None and self.thread.is_alive()
 
     def _drain_queue(self):
+        if self._exiting:
+            return
+        if self._queue_after_id is not None:
+            self.root.after_cancel(self._queue_after_id)
+            self._queue_after_id = None
+        if self._desktop_session is not None:
+            for action in self._desktop_session.drain_actions():
+                if action == "show":
+                    self.show_window()
+                elif action == "exit":
+                    self.request_exit()
+                if self._exiting:
+                    return
         try:
             while True:
                 kind, level, text = self.queue.get_nowait()
@@ -1491,13 +1565,13 @@ class BookingGUI:
                     self._set_w3_controls_running(False)
                     self.append_log("本次任务已结束。", 0)
                     if self.close_after_stop:
-                        self.root.destroy()
+                        self._finish_exit()
                         return
                 else:
                     self.append_log(text, level)
         except queue.Empty:
             pass
-        self.root.after(140, self._drain_queue)
+        self._queue_after_id = self.root.after(140, self._drain_queue)
 
     def append_log(self, text: str, level: int):
         tag = "error" if level >= logging.ERROR else "warning" if level >= logging.WARNING else "system" if level == 0 else None
@@ -1519,13 +1593,44 @@ class BookingGUI:
             messagebox.showerror("打开失败", str(exc), parent=self.root)
 
     def on_close(self):
+        if self._desktop_session is None:
+            self.request_exit()
+            return
+        if not self._tray_ready or not self._desktop_session.tray_available:
+            messagebox.showwarning("暂时无法收起", "系统托盘暂不可用，窗口将保持打开。\n要退出程序，请在高级设置中点击“退出程序”。", parent=self.root)
+            return
+        if self._w3_dialog is not None:
+            self._w3_dialog.close()
+        for child in self.root.winfo_children():
+            if isinstance(child, tk.Toplevel):
+                child.destroy()
+        self._window_drag = None
+        self.root.withdraw()
+
+    def request_exit(self):
+        if self._exiting or self.close_after_stop:
+            return
         if self.is_running():
-            if not messagebox.askyesno("任务正在运行", "当前任务仍在运行。\n是否先安全停止，再关闭程序？", parent=self.root):
+            self.show_window()
+            if not messagebox.askyesno("退出程序", "当前任务仍在运行。\n是否安全停止任务并退出程序？", parent=self.root):
                 return
             self.close_after_stop = True
             self.stop_run()
         else:
-            self.root.destroy()
+            self._finish_exit()
+
+    def _finish_exit(self):
+        if self._exiting:
+            return
+        self._exiting = True
+        for name in ("_queue_after_id", "_frame_after_id"):
+            callback = getattr(self, name, None)
+            if callback is not None:
+                self.root.after_cancel(callback)
+                setattr(self, name, None)
+        if self._desktop_session is not None:
+            self._desktop_session.close()
+        self.root.destroy()
 
 
 def run_window_drag_self_test(app):
@@ -1680,7 +1785,7 @@ def run_self_test(marker: Path):
     assert got["rooms"] == test_config["rooms"]
     for key in ("release_open_at", "prepare_before_seconds", "stop_after_seconds", "retry_seconds",
                 "popup_retry_seconds", "watch_interval_seconds", "watch_duration_minutes", "watch_guard_seconds",
-                "auth_stagger_seconds", "verbose_logs", "step_timing_logs", "stop_at_meeting_start"):
+                "auth_stagger_seconds", "verbose_logs", "step_timing_logs", "stop_at_meeting_start", "start_with_windows"):
         assert got[key] == test_config[key], f"界面与核心参数未同步：{key}"
     specs = core.resolve_rooms(got["rooms"])
     assert {(room.area, room.name, room.row) for room in specs} == {
@@ -1735,6 +1840,7 @@ def main():
         return check_account_to_file(Path(sys.argv[2]))
     from gui_diagnostics import GuiDiagnostics
     diagnostics = None
+    desktop_session = None
     try:
         try:
             diagnostics = GuiDiagnostics(core.LOG_DIR)
@@ -1750,8 +1856,15 @@ def main():
             messagebox.showerror("账号未获授权", str(exc), parent=root)
             root.destroy()
             return 2
-        BookingGUI(root)
-        root.deiconify()
+        startup_manager = None
+        if sys.platform == "win32":
+            desktop_session = DesktopSession(core.DEPLOYMENT_ID, f"会议室自动抢订 · {core.DEPLOYMENT_LABEL}")
+            if not desktop_session.acquire():
+                root.destroy()
+                return 0
+            startup_manager = StartupManager(core.DEPLOYMENT_ID)
+        app = BookingGUI(root, desktop_session=desktop_session, startup_manager=startup_manager)
+        app.show_window()
         root.mainloop()
         return 0
     except Exception:
@@ -1760,6 +1873,8 @@ def main():
             return 1
         raise
     finally:
+        if desktop_session is not None:
+            desktop_session.close()
         if diagnostics is not None:
             diagnostics.close()
 

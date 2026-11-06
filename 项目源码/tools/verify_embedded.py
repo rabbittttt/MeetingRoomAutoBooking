@@ -19,7 +19,8 @@ from deployment_profiles import PROFILES, get_profile
 
 RUNTIME_MODULES = (
     "booking_core", "booking_profile", "account_auth", "account_public_key",
-    "gui_diagnostics", "window_chrome", "date_picker", "w3_credentials", "w3_login", "build_info",
+    "gui_diagnostics", "window_chrome", "date_picker", "w3_credentials", "w3_login",
+    "desktop_lifecycle", "build_info",
 )
 HASHED_RUNTIME_MODULES = tuple(name for name in RUNTIME_MODULES
                                if name not in {"booking_core", "booking_profile", "build_info"})

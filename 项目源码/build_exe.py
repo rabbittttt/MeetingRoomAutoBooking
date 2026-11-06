@@ -148,6 +148,7 @@ def sync_sources(settings: dict) -> tuple[Path, Path]:
 RUNTIME_MODULES = (
     "account_auth.py", "account_public_key.py", "gui_diagnostics.py",
     "window_chrome.py", "date_picker.py", "w3_credentials.py", "w3_login.py",
+    "desktop_lifecycle.py",
 )
 
 
