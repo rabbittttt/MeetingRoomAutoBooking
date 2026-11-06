@@ -19,6 +19,52 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_ICON_PATH = Path(__file__).resolve().parent / "assets" / "app_icon.ico"
 
 
+def _query_system_dpi(user) -> int:
+    """Read physical system DPI, restoring the calling thread before any Tk call."""
+    switch = user.SetThreadDpiAwarenessContext
+    switch.argtypes, switch.restype = [ctypes.c_void_p], ctypes.c_void_p
+    read = user.GetDpiForSystem
+    read.argtypes, read.restype = [], wintypes.UINT
+    previous = switch(ctypes.c_void_p(-2))  # DPI_AWARENESS_CONTEXT_SYSTEM_AWARE
+    if not previous:
+        return 96
+    try:
+        return int(read()) or 96
+    finally:
+        switch(previous)
+
+
+def get_system_dpi() -> int:
+    if sys.platform != "win32":
+        return 96
+    try:
+        return _query_system_dpi(ctypes.WinDLL("user32", use_last_error=True))
+    except (AttributeError, OSError):
+        return 96
+
+
+def _scaled_icon_sizes(dpi: int) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Fallback metrics for Windows versions without GetSystemMetricsForDpi."""
+    return tuple((max(1, (size * dpi + 48) // 96),) * 2 for size in (16, 32))
+
+
+def system_icon_sizes(dpi: int | None = None) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Return physical small/big icon dimensions without changing Tk's DPI mode."""
+    dpi = get_system_dpi() if dpi is None else int(dpi)
+    if dpi <= 0:
+        raise ValueError("DPI must be positive")
+    fallback = _scaled_icon_sizes(dpi)
+    if sys.platform != "win32":
+        return fallback
+    try:
+        metric = ctypes.WinDLL("user32", use_last_error=True).GetSystemMetricsForDpi
+        metric.argtypes, metric.restype = [ctypes.c_int, wintypes.UINT], ctypes.c_int
+        return tuple(tuple(int(metric(index, dpi)) or default for index, default in zip(indices, pair))
+                     for indices, pair in zip(((49, 50), (11, 12)), fallback))
+    except (AttributeError, OSError):
+        return fallback
+
+
 def _profile_name(profile_id: str) -> str:
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}", profile_id):
         raise ValueError("部署编号格式不正确")
@@ -354,8 +400,9 @@ class _NativeTray:
             data.uFlags = 1 | 2 | 4 | 0x80  # MESSAGE | ICON | TIP | SHOWTIP
             data.uCallbackMessage = self.CALLBACK
             if APP_ICON_PATH.is_file():
+                small, _ = system_icon_sizes()
                 self._owned_icon = user.LoadImageW(None, str(APP_ICON_PATH), 1,
-                    max(16, user.GetSystemMetrics(49)), max(16, user.GetSystemMetrics(50)), 0x10)
+                    small[0], small[1], 0x10)
             # File-loaded icons belong to this thread; the emergency system icon is shared.
             data.hIcon = self._owned_icon or user.LoadIconW(None, ctypes.c_void_p(32512))
             data.szTip = self.session.label[:127]

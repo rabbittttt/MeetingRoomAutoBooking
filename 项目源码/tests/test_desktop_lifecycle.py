@@ -1,5 +1,6 @@
 """Startup writes use a fake registry. Native tray smoke is explicit opt-in."""
 from contextlib import nullcontext
+import ctypes
 import os
 from pathlib import Path
 import subprocess
@@ -7,11 +8,45 @@ import sys
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import desktop_lifecycle as desktop
+
+
+class IconMetricsTests(unittest.TestCase):
+    def test_common_scaling_has_real_pixel_icon_sizes(self):
+        for dpi, small, large in ((96, 16, 32), (120, 20, 40), (144, 24, 48), (192, 32, 64)):
+            with self.subTest(dpi=dpi):
+                self.assertEqual(desktop._scaled_icon_sizes(dpi), ((small, small), (large, large)))
+
+    def test_dpi_query_restores_thread_context_after_success_and_failure(self):
+        for failure in (False, True):
+            with self.subTest(failure=failure):
+                switch = Mock(return_value=123)
+                read = Mock(side_effect=OSError("fixture") if failure else None, return_value=144)
+                api = SimpleNamespace(SetThreadDpiAwarenessContext=switch, GetDpiForSystem=read)
+                if failure:
+                    with self.assertRaises(OSError):
+                        desktop._query_system_dpi(api)
+                else:
+                    self.assertEqual(desktop._query_system_dpi(api), 144)
+                self.assertEqual(switch.call_count, 2)
+                self.assertEqual(switch.call_args.args, (123,))
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows DPI APIs")
+    def test_metrics_query_does_not_change_the_gui_thread_awareness(self):
+        user = ctypes.WinDLL("user32")
+        user.GetThreadDpiAwarenessContext.argtypes = []
+        user.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        before = user.GetThreadDpiAwarenessContext()
+        dpi = desktop.get_system_dpi()
+        self.assertEqual(user.GetThreadDpiAwarenessContext(), before)
+        self.assertGreaterEqual(dpi, 96)
+        self.assertTrue(all(value > 0 for pair in desktop.system_icon_sizes(dpi) for value in pair))
 
 
 class FakeRegistry:

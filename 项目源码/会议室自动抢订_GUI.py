@@ -51,6 +51,9 @@ W3_LOGIN_ORIGIN = "https://login.huawei.com"
 
 # 嫩粉少女风：背景更轻、更偏粉；主色降低灰度，文字保持深色以保证清晰度。
 BG = "#FFF7FA"
+TITLE_BG = "#F5CEDD"
+TITLE_TEXT = "#70364E"
+TITLE_HOVER = "#EDB4C9"
 WHITE = "#FFFFFF"
 TEXT = "#3B3338"
 MUTED = "#8A7A82"
@@ -376,7 +379,7 @@ class CompactPanel(ttk.Frame):
 class WindowControlButton(RoundedActionButton):
     """标题栏沿用主题按钮的键盘操作，用线条绘制窗口图标。"""
     def __init__(self, parent, *, text, command):
-        super().__init__(parent, text=text, command=command, width=42, height=30, bg=BG)
+        super().__init__(parent, text=text, command=command, width=42, height=30, bg=TITLE_BG)
         self.bind("<FocusIn>", lambda _: self._render())
         self.bind("<FocusOut>", lambda _: self._render())
 
@@ -390,19 +393,19 @@ class WindowControlButton(RoundedActionButton):
 
     def _render(self):
         self.delete("all")
-        fill = "#F8D9E5" if self.hover else BG
-        border = ACCENT_TEXT if self.focus_get() is self else fill
+        fill = TITLE_HOVER if self.hover else TITLE_BG
+        border = TITLE_TEXT if self.focus_get() is self else fill
         draw_rounded_rectangle(self, 1, 1, 41, 29, 8, fill=fill, outline=border)
         if self.title == "最小化":
-            self.create_line(16, 17, 26, 17, fill=TEXT, width=1.4)
+            self.create_line(16, 17, 26, 17, fill=TITLE_TEXT, width=1.4)
         elif self.title == "最大化":
-            self.create_rectangle(16, 10, 26, 20, outline=TEXT, width=1.2)
+            self.create_rectangle(16, 10, 26, 20, outline=TITLE_TEXT, width=1.2)
         elif self.title == "还原":
-            self.create_rectangle(18, 9, 27, 18, outline=TEXT, width=1.2)
-            self.create_rectangle(15, 12, 24, 21, outline=TEXT, fill=fill, width=1.2)
+            self.create_rectangle(18, 9, 27, 18, outline=TITLE_TEXT, width=1.2)
+            self.create_rectangle(15, 12, 24, 21, outline=TITLE_TEXT, fill=fill, width=1.2)
         else:
-            self.create_line(16, 10, 26, 20, fill=TEXT, width=1.4)
-            self.create_line(16, 20, 26, 10, fill=TEXT, width=1.4)
+            self.create_line(16, 10, 26, 20, fill=TITLE_TEXT, width=1.4)
+            self.create_line(16, 20, 26, 10, fill=TITLE_TEXT, width=1.4)
 
 
 class W3CredentialsDialog:
@@ -554,7 +557,7 @@ class BookingGUI:
         self._window_drag = None
         if sys.platform == "win32":
             try:
-                self._window_frame = WindowsWindowFrame(root)
+                self._window_frame = WindowsWindowFrame(root, icon_path=APP_ICON_PATH)
             except (OSError, AttributeError, tk.TclError) as exc:
                 logging.warning("窗口样式初始化失败，改用系统窗口：%s", exc)
                 root.overrideredirect(False)
@@ -821,16 +824,27 @@ class BookingGUI:
     def _build(self):
         outer = ttk.Frame(self.root, style="Background.TFrame", padding=(11, 8))
         outer.pack(fill="both", expand=True)
-        self.titlebar = tk.Frame(outer, bg=BG, height=32)
+        self.titlebar = tk.Frame(outer, bg=TITLE_BG, padx=10, pady=5)
         self.titlebar.pack(fill="x", pady=(0, 5))
-        title = tk.Label(self.titlebar, text="会议室自动抢订", bg=BG, fg=ACCENT_TEXT,
-                         font=(FONT, 13, "bold"))
-        title.pack(side="left")
+        # PhotoImage按实际像素显示，选择对应缩放尺寸，避免把大源图临时缩小。
+        icon_size = min((24, 30, 36, 48), key=lambda size: abs(size - 24 * self.root.winfo_fpixels("1i") / 96))
+        try:
+            self._title_icon_image = tk.PhotoImage(master=self.root,
+                file=str(APP_ICON_PATH.parent / f"title_icon_{icon_size}.png"))
+        except tk.TclError as exc:
+            logging.warning("标题栏图标加载失败：%s", exc)
+            self._title_icon_image = None
+        self.title_icon_label = tk.Label(self.titlebar, image=self._title_icon_image,
+                                         bg=TITLE_BG, borderwidth=0, padx=0, pady=0)
+        self.title_icon_label.pack(side="left", padx=(0, 8))
+        self.title_label = tk.Label(self.titlebar, text="会议室自动抢订", bg=TITLE_BG, fg=TITLE_TEXT,
+                                   font=(FONT, 13, "bold"))
+        self.title_label.pack(side="left")
         WindowControlButton(self.titlebar, text="关闭", command=self.on_close).pack(side="right")
         self.maximize_button = WindowControlButton(self.titlebar, text="最大化", command=self._toggle_maximize)
         self.maximize_button.pack(side="right")
         WindowControlButton(self.titlebar, text="最小化", command=self._minimize_window).pack(side="right")
-        for surface in (self.titlebar, title):
+        for surface in (self.titlebar, self.title_icon_label, self.title_label):
             surface.bind("<ButtonPress-1>", self._start_window_drag)
             surface.bind("<B1-Motion>", self._drag_window)
             surface.bind("<ButtonRelease-1>", self._end_window_drag)
@@ -1650,6 +1664,8 @@ class BookingGUI:
                 setattr(self, name, None)
         if self._desktop_session is not None:
             self._desktop_session.close()
+        if self._window_frame is not None:
+            self._window_frame.close()
         self.root.destroy()
 
 

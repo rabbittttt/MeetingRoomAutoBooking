@@ -152,7 +152,11 @@ RUNTIME_MODULES = (
     "window_chrome.py", "date_picker.py", "w3_credentials.py", "w3_login.py",
     "desktop_lifecycle.py",
 )
-RUNTIME_ASSETS = ("assets/app_icon.ico",)
+RUNTIME_ASSETS = (
+    "assets/app_icon.ico",
+    "assets/title_icon_24.png", "assets/title_icon_30.png",
+    "assets/title_icon_36.png", "assets/title_icon_48.png",
+)
 
 
 def runtime_module_hashes(directory: Path) -> dict[str, str]:
@@ -388,12 +392,15 @@ def build_command(python: Path, settings: dict, gui: Path, source: Path) -> tupl
     icon = source.parent / "assets" / "app_icon.ico"
     cmd = [str(python), "-m", "PyInstaller", "--noconfirm",
            "--onefile", "--windowed", "--noupx", "--name", exe_name,
-           "--icon", str(icon), "--add-data", f"{icon}{os.pathsep}assets",
+           "--icon", str(icon),
            "--paths", str(source.parent), "--distpath", str(dist),
            "--workpath", str(ROOT / "build" / "pyinstaller" / profile_id),
            "--specpath", str(ROOT / "build" / "specs" / profile_id)]
     if settings["clean_build"]:
         cmd.append("--clean")
+    for filename in RUNTIME_ASSETS:
+        asset = source.parent / filename
+        cmd.extend(["--add-data", f"{asset}{os.pathsep}{Path(filename).parent.as_posix()}"])
     for module_path in settings["module_paths"]:
         if not isinstance(module_path, str) or not module_path.strip():
             raise ValueError("module_paths 中必须填写目录路径")

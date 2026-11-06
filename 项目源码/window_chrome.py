@@ -7,6 +7,10 @@ from sizing, movement, and painting.
 from __future__ import annotations
 
 import sys
+import logging
+from pathlib import Path
+
+from desktop_lifecycle import system_icon_sizes
 
 
 class _WindowsShell:
@@ -41,6 +45,67 @@ class _WindowsShell:
         self.MonitorInfo = MonitorInfo
         self.api.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MonitorInfo)]
         self.api.GetMonitorInfoW.restype = wintypes.BOOL
+        self.api.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
+                                       ctypes.c_int, ctypes.c_int, wintypes.UINT]
+        self.api.LoadImageW.restype = wintypes.HICON
+        self.api.DestroyIcon.argtypes, self.api.DestroyIcon.restype = [wintypes.HICON], wintypes.BOOL
+        self.api.IsWindow.argtypes, self.api.IsWindow.restype = [wintypes.HWND], wintypes.BOOL
+        self.api.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        self.api.SendMessageW.restype = ctypes.c_ssize_t
+        self._icon_handles = None
+        self._icon_key = None
+        self._icon_hwnd = None
+        self._icon_windows = set()
+
+    def _detach_icons(self, hwnd, handles):
+        if not hwnd or not self.api.IsWindow(hwnd):
+            return
+        for kind, handle in enumerate(handles):
+            if self.api.SendMessageW(hwnd, 0x007F, kind, 0) == handle:  # WM_GETICON
+                self.api.SendMessageW(hwnd, 0x0080, kind, 0)  # WM_SETICON
+
+    def set_application_icons(self, root, icon_path):
+        hwnd = self.handle(root)
+        sizes = system_icon_sizes()
+        key = (str(Path(icon_path).resolve()), sizes)
+        old = self._icon_handles
+        if key != self._icon_key:
+            loaded = []
+            try:
+                for width, height in sizes:
+                    icon = self.api.LoadImageW(None, key[0], 1, width, height, 0x10)
+                    if not icon:
+                        raise self.ctypes.WinError(self.ctypes.get_last_error())
+                    loaded.append(icon)
+            except BaseException:
+                for icon in set(loaded):
+                    self.api.DestroyIcon(icon)
+                raise
+            if old:
+                for previous_window in self._icon_windows:
+                    self._detach_icons(previous_window, old)
+                self._icon_windows.clear()
+            self._icon_handles = tuple(loaded)
+            self._icon_key = key
+        # Tk can recreate or reset its wrapper on state transitions. Reassign
+        # our physical-size icons after each stable Map, reusing loaded handles.
+        for kind, icon in enumerate(self._icon_handles):
+            self.api.SendMessageW(hwnd, 0x0080, kind, icon)
+        self._icon_hwnd = hwnd
+        self._icon_windows.add(hwnd)
+        if old and old != self._icon_handles:
+            for icon in set(old):
+                self.api.DestroyIcon(icon)
+
+    def close_icons(self):
+        if not self._icon_handles:
+            return
+        for hwnd in self._icon_windows:
+            self._detach_icons(hwnd, self._icon_handles)
+        for icon in set(self._icon_handles):
+            self.api.DestroyIcon(icon)
+        self._icon_handles = self._icon_key = self._icon_hwnd = None
+        self._icon_windows.clear()
 
     def handle(self, root):
         # Tk can recreate its outer wrapper during a map/state change.
@@ -79,18 +144,37 @@ class BorderlessWindow:
     maximized dragging calls restore() before its usual Tk movement.
     """
 
-    def __init__(self, root):
+    def __init__(self, root, icon_path=None):
         self.root = root
+        self.icon_path = icon_path
         self.maximized = False
         self._normal_geometry = None
         self._shell = None
         root.overrideredirect(True)
+        if icon_path is not None and hasattr(root, "bind"):
+            root.bind("<Destroy>", self._on_destroy, add="+")
         if sys.platform == "win32" and root.state() == "withdrawn":
             # Materialize Tk's wrapper while it is still hidden, so Explorer
             # sees an application window at its very first visible mapping.
             # This does not run general events or remap an already-visible UI.
             root.update_idletasks()
             self._windows_shell().enable_taskbar(root)
+            self._apply_application_icons()
+
+    def _apply_application_icons(self):
+        if self.icon_path is not None:
+            try:
+                self._windows_shell().set_application_icons(self.root, self.icon_path)
+            except OSError as exc:
+                logging.warning("窗口图标加载失败，保留Tk默认图标：%s", exc)
+
+    def close(self):
+        if self._shell is not None:
+            self._shell.close_icons()
+
+    def _on_destroy(self, event):
+        if event.widget is self.root:
+            self.close()
 
     def _windows_shell(self):
         if self._shell is None:
@@ -105,6 +189,7 @@ class BorderlessWindow:
             self.root.overrideredirect(True)
         if sys.platform == "win32":
             self._windows_shell().enable_taskbar(self.root)
+            self._apply_application_icons()
         return True
 
     def minimize(self):

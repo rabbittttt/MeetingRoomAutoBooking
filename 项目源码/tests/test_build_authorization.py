@@ -230,8 +230,10 @@ class BuildAuthorizationTests(unittest.TestCase):
         gui_code = compile(gui.read_text(encoding="utf-8"), "embedded/gui.py", "exec",
                            dont_inherit=True)
         pyz = types.SimpleNamespace(toc=dict.fromkeys(payloads), extract=payloads.__getitem__)
-        data = {name: (b"tampered-icon" if tamper_asset else (stage / name).read_bytes())
-                for name in verify_embedded.RUNTIME_ASSETS if not missing_asset}
+        data = {name: (b"tampered-icon" if tamper_asset is True or tamper_asset == name
+                       else (stage / name).read_bytes())
+                for name in verify_embedded.RUNTIME_ASSETS
+                if not (missing_asset is True or missing_asset == name)}
         if credential_file:
             data[f"local_data/{credential_file}"] = b"credential-marker"
         data[gui.stem] = marshal.dumps(gui_code)
@@ -325,6 +327,15 @@ class BuildAuthorizationTests(unittest.TestCase):
             self.verify(tamper_asset=True)
         with self.assertRaisesRegex(ValueError, "缺少内嵌图标素材"):
             self.verify(missing_asset=True)
+
+    def test_embedded_verification_requires_each_title_icon_size(self):
+        for size in (24, 30, 36, 48):
+            name = f"assets/title_icon_{size}.png"
+            with self.subTest(size=size):
+                with self.assertRaisesRegex(ValueError, "内嵌图标素材.*不一致"):
+                    self.verify(tamper_asset=name)
+                with self.assertRaisesRegex(ValueError, "缺少内嵌图标素材"):
+                    self.verify(missing_asset=name)
 
     def test_embedded_verification_rejects_stale_icon_hash(self):
         source, gui = build_exe.prepare_build_sources(

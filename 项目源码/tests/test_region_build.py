@@ -98,6 +98,7 @@ class RegionBuildTests(unittest.TestCase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes((ROOT / filename).read_bytes())
         (self.build_root / "assets" / "source-only.png").write_bytes(b"not-a-runtime-asset")
+        (self.build_root / "assets" / "source-only.svg").write_text("<svg/>", encoding="utf-8")
         (self.build_root / "deployment_profiles.py").write_text(
             "ALL_DEPLOYMENTS_MUST_NOT_SHIP = True\n", encoding="utf-8")
         (self.build_root / "license_admin.py").write_text(
@@ -178,8 +179,8 @@ class RegionBuildTests(unittest.TestCase):
                     "booking_core.py", "booking_profile.py", "build_info.py", gui.name}
                 self.assertEqual({p.relative_to(source.parent).as_posix()
                                   for p in source.parent.rglob("*") if p.is_file()}, expected_files)
-                self.assertEqual((source.parent / "assets" / "app_icon.ico").read_bytes(),
-                                 (ROOT / "assets" / "app_icon.ico").read_bytes())
+                for filename in build_exe.RUNTIME_ASSETS:
+                    self.assertEqual((source.parent / filename).read_bytes(), (ROOT / filename).read_bytes())
                 for name in ("w3_credentials.py", "w3_login.py"):
                     self.assertIn(name, expected_files)
                     self.assertEqual((source.parent / name).read_bytes(), (ROOT / name).read_bytes())
@@ -221,7 +222,9 @@ class RegionBuildTests(unittest.TestCase):
             self.assertEqual(command[command.index("--specpath") + 1], str(self.build_root / "build" / "specs" / profile_id))
             icon = source.parent / "assets" / "app_icon.ico"
             self.assertEqual(command[command.index("--icon") + 1], str(icon))
-            self.assertIn(f"{icon}{os.pathsep}assets", command)
+            data_args = {command[index + 1] for index, value in enumerate(command) if value == "--add-data"}
+            self.assertEqual(data_args, {
+                f"{source.parent / filename}{os.pathsep}assets" for filename in build_exe.RUNTIME_ASSETS})
             self.assertEqual(output, self.build_root / "dist" / profile_id / f"会议室自动抢订_{profile_id}.exe")
             imports = [command[index + 1] for index, value in enumerate(command) if value == "--hidden-import"]
             self.assertIn("booking_profile", imports)

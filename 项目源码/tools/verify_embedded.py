@@ -25,7 +25,11 @@ RUNTIME_MODULES = (
 HASHED_RUNTIME_MODULES = tuple(name for name in RUNTIME_MODULES
                                if name not in {"booking_core", "booking_profile", "build_info"})
 FORBIDDEN_MODULES = ("license_admin", "deployment_profiles")
-RUNTIME_ASSETS = ("assets/app_icon.ico",)
+RUNTIME_ASSETS = (
+    "assets/app_icon.ico",
+    "assets/title_icon_24.png", "assets/title_icon_30.png",
+    "assets/title_icon_36.png", "assets/title_icon_48.png",
+)
 
 
 def normalized(value):

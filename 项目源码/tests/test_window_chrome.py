@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import window_chrome as chrome
+from desktop_lifecycle import APP_ICON_PATH, system_icon_sizes
 
 
 class FakeRoot:
@@ -150,6 +151,61 @@ class BorderlessWindowTests(unittest.TestCase):
         native.set_style.assert_not_called()
 
 
+class WindowIconOwnershipTests(unittest.TestCase):
+    def make_shell(self, handles):
+        native = chrome._WindowsShell.__new__(chrome._WindowsShell)
+        native.handle = Mock(return_value=55)
+        native.api, native.ctypes = Mock(), Mock()
+        native.ctypes.WinError.return_value = OSError("fixture image load failure")
+        native.api.LoadImageW.side_effect = handles
+        native.api.IsWindow.return_value = True
+        native._icon_handles = native._icon_key = native._icon_hwnd = None
+        native._icon_windows = set()
+        state = {}
+        def message(hwnd, command, kind, icon):
+            if command == 0x007F:
+                return state.get((hwnd, kind), 0)
+            previous = state.get((hwnd, kind), 0)
+            state[hwnd, kind] = icon
+            return previous
+        native.api.SendMessageW.side_effect = message
+        return native, state
+
+    def test_cached_icons_reapply_to_recreated_wrapper_and_close_once(self):
+        native, state = self.make_shell([101, 102])
+        with patch.object(chrome, "system_icon_sizes", return_value=((20, 20), (40, 40))):
+            native.set_application_icons(None, APP_ICON_PATH)
+            native.handle.return_value = 56
+            native.set_application_icons(None, APP_ICON_PATH)
+        self.assertEqual(native.api.LoadImageW.call_count, 2)
+        self.assertEqual([call.args[3:5] for call in native.api.LoadImageW.call_args_list], [(20, 20), (40, 40)])
+        self.assertEqual(state[55, 0], 101)
+        self.assertEqual(state[56, 1], 102)
+        native.close_icons()
+        native.close_icons()
+        self.assertEqual(native.api.DestroyIcon.call_count, 2)
+        self.assertTrue(all(value == 0 for value in state.values()))
+
+    def test_size_change_releases_old_owned_icons_after_new_ones_are_ready(self):
+        native, state = self.make_shell([101, 102, 201, 202])
+        with patch.object(chrome, "system_icon_sizes", side_effect=[((20,20),(40,40)), ((24,24),(48,48))]):
+            native.set_application_icons(None, APP_ICON_PATH)
+            native.set_application_icons(None, APP_ICON_PATH)
+        self.assertEqual(native._icon_handles, (201, 202))
+        self.assertEqual({call.args[0] for call in native.api.DestroyIcon.call_args_list}, {101, 102})
+        self.assertEqual(state[55, 0], 201)
+
+    def test_partial_load_failure_keeps_existing_icons_and_releases_temporary_handle(self):
+        native, state = self.make_shell([101, 102, 201, None])
+        with patch.object(chrome, "system_icon_sizes", side_effect=[((20,20),(40,40)), ((24,24),(48,48))]):
+            native.set_application_icons(None, APP_ICON_PATH)
+            with self.assertRaises(OSError):
+                native.set_application_icons(None, APP_ICON_PATH)
+        self.assertEqual(native._icon_handles, (101, 102))
+        native.api.DestroyIcon.assert_called_once_with(201)
+        self.assertEqual(state[55, 1], 102)
+
+
 def run_tk_probe():
     import ctypes
     from ctypes import wintypes
@@ -164,7 +220,7 @@ def run_tk_probe():
     root.geometry("640x420+120+100")
     root.configure(bg="#fff7fa")
     tk.Label(root, text="窗口框架验证", bg="#fff7fa").pack(fill="both", expand=True)
-    frame = chrome.BorderlessWindow(root)
+    frame = chrome.BorderlessWindow(root, icon_path=APP_ICON_PATH)
     native = frame._windows_shell()
     hidden_handle = native.handle(root)
     hidden_style = native.get_style(hidden_handle, -20)
@@ -201,6 +257,29 @@ def run_tk_probe():
         assert not native.get_style(hwnd, -16) & 0x00C00000, "native caption remains"
         assert root.overrideredirect(), "Tk lost borderless setting"
         assert not errors, errors
+
+        class IconInfo(ctypes.Structure):
+            _fields_ = [("fIcon", wintypes.BOOL), ("xHotspot", wintypes.DWORD),
+                        ("yHotspot", wintypes.DWORD), ("hbmMask", wintypes.HBITMAP), ("hbmColor", wintypes.HBITMAP)]
+        class Bitmap(ctypes.Structure):
+            _fields_ = [("kind", wintypes.LONG), ("width", wintypes.LONG), ("height", wintypes.LONG),
+                        ("stride", wintypes.LONG), ("planes", wintypes.WORD), ("bits", wintypes.WORD), ("data", ctypes.c_void_p)]
+        api.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        api.SendMessageW.restype = ctypes.c_ssize_t
+        api.GetIconInfo.argtypes, api.GetIconInfo.restype = [wintypes.HICON, ctypes.POINTER(IconInfo)], wintypes.BOOL
+        gdi = ctypes.WinDLL("gdi32")
+        gdi.GetObjectW.argtypes, gdi.GetObjectW.restype = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p], ctypes.c_int
+        gdi.DeleteObject.argtypes, gdi.DeleteObject.restype = [wintypes.HANDLE], wintypes.BOOL
+        for kind, expected in enumerate(system_icon_sizes()):
+            info, bitmap = IconInfo(), Bitmap()
+            icon = api.SendMessageW(hwnd, 0x007F, kind, 0)
+            assert icon and api.GetIconInfo(icon, ctypes.byref(info)), "physical window icon missing"
+            try:
+                assert gdi.GetObjectW(info.hbmColor, ctypes.sizeof(bitmap), ctypes.byref(bitmap))
+                assert (bitmap.width, bitmap.height) == expected, ("wrong physical icon size", kind, bitmap.width, bitmap.height, expected)
+            finally:
+                for handle in (info.hbmMask, info.hbmColor):
+                    if handle: gdi.DeleteObject(handle)
 
     try:
         root.deiconify()
@@ -240,6 +319,7 @@ def run_tk_probe():
         print("tk-borderless-outer-client-taskbar-move-maximize-minimize-ok", flush=True)
     finally:
         root.destroy()
+        assert frame._shell._icon_handles is None, "window icon handles survived root destruction"
 
 
 @unittest.skipUnless(sys.platform == "win32", "Windows Tk regression")
