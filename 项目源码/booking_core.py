@@ -1700,7 +1700,7 @@ async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col
         raise SelectorConfigurationError("无法唯一确定当前选房弹窗，拒绝时间格子点击")
     result = await panels.evaluate_handle(r"""(panel, args) => {
         const {startCol,endCol,roomName,fullNamePattern,shortNamePattern,expectedNames}=args;
-        const fullNameRx=new RegExp('^(?:'+fullNamePattern+')$','i');
+        const fullNameRx=new RegExp(fullNamePattern,'i');
         const shortName = name => {
             const match=name.toUpperCase().match(new RegExp(shortNamePattern));
             return match?match[1].replaceAll('_','-'):name.toUpperCase();
@@ -1760,8 +1760,10 @@ async def locate_room_cells(page: Page, room_name: str, room_row: int, start_col
             const r=e.getBoundingClientRect();
             if(!r.width||!r.height||getComputedStyle(e).visibility==='hidden') continue;
             const text=(e.textContent||'').trim();
-            if(!fullNameRx.test(text)) continue;
-            const name=text.replace(/[-_]+$/,'');
+            // 与读取名单使用同一提取规则，房名后的“（外来接待室）”等备注不是房号。
+            const match=text.match(fullNameRx);
+            if(!match) continue;
+            const name=match[0].replace(/[-_]+$/,'');
             if(shortName(name)===roomName.toUpperCase()) targetTextPresent=true;
             const center=r.y+r.height/2;
             if(!grids.some(g=>r.right<=g.left+2 &&

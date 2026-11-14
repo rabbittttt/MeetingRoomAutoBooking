@@ -53,6 +53,24 @@ def grid_html(names):
         return grid_fixture.fixture_html(redraw=True, header=True, background=True)
 
 
+def noted_grid_html(names, *, end_column=32):
+    """复用实测横滚尺寸，并加入用户提供的房名备注；页面交互仍是离线夹具。"""
+    with patch.object(grid_fixture, "ROOMS", tuple(names)):
+        html = grid_fixture.observed_scroll_grid_html(start_column=30, end_column=end_column)
+    for name in names:
+        note = ("（培训室）" if name in MISSING_ROOMS else
+                "（外来接待室:主题需备注接待信息）" if name == "1F-A14R" else
+                "（外来接待室）")
+        html = html.replace(f"CN-ShenZhen-F5-{name}</span>",
+                            f"CN-ShenZhen-F5-{name}{note}</span>")
+    html = html.replace(".room-names>span {display:block;",
+                        ".room-names>span {display:block;width:232px;margin-left:8px;overflow:hidden;")
+    if end_column == 30:
+        html = html.replace("selected.length===2 && selected[0]===30 && selected[1]===30",
+                            "selected.length===1 && selected[0]===30")
+    return html
+
+
 class VisibleSubsetRulesTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
@@ -166,6 +184,53 @@ class VisibleSubsetBrowserTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await self.page.evaluate("window.clicked"),
                                  [f"room{row}-21", f"room{row}-24"])
                 self.assertTrue(await self.page.locator("#confirm").is_enabled())
+
+    async def test_observed_room_notes_allow_a18_start_and_end_in_scrolled_unlabelled_grid(self):
+        self.target = core.Target(date(2026, 11, 17), "14:30", "16:00", (AREA,))
+        await self.page.set_content(noted_grid_html(FULL_ROOMS))
+        visible = await core.read_visible_room_names(self.page)
+        self.assertEqual([core.room_short_name(item["name"]) for item in visible], list(FULL_ROOMS))
+        for column, x in ((30, 901), (32, 961)):
+            cell = self.page.locator(f"#room9-{column}")
+            self.assertEqual((await cell.bounding_box())["x"], x)
+            for attribute in ("data-time", "title", "aria-label"):
+                self.assertIsNone(await cell.get_attribute(attribute))
+        pair = await core.locate_room_cells(self.page, "1F-A18R", 9, 30, 32)
+        self.assertIsNotNone(pair, "已识别的房名备注不应使选格核验丢失目标行")
+        for cell in pair:
+            await cell.dispose()
+        await self.select("1F-A18R")
+        self.assertEqual(await self.page.evaluate("window.clicked"), ["room9-30", "room9-32"])
+        self.assertTrue(await self.page.locator("#confirm").is_enabled())
+
+    async def test_noted_partial_roster_uses_actual_row_instead_of_configured_row(self):
+        self.target = core.Target(date(2026, 11, 17), "14:30", "16:00", (AREA,))
+        await self.page.set_content(noted_grid_html(VISIBLE_ROOMS))
+        self.assertEqual(self.rows["1F-A18R"], 9)
+        await self.select("1F-A18R")
+        self.assertEqual(await self.page.evaluate("window.clicked"), ["room8-30", "room8-32"])
+        self.assertTrue(await self.page.locator("#confirm").is_enabled())
+
+    async def test_noted_half_hour_still_clicks_once(self):
+        self.target = core.Target(date(2026, 11, 17), "14:30", "15:00", (AREA,))
+        await self.page.set_content(noted_grid_html(FULL_ROOMS, end_column=30))
+        await self.select("1F-A18R")
+        self.assertEqual(await self.page.evaluate("window.clicked"), ["room9-30"])
+        self.assertTrue(await self.page.locator("#confirm").is_enabled())
+
+    async def test_room_notes_do_not_bypass_unknown_duplicate_or_reordered_roster_checks(self):
+        reordered = list(FULL_ROOMS)
+        reordered[1:3] = reversed(reordered[1:3])
+        cases = {"unknown": (*FULL_ROOMS, "1F-A99R"),
+                 "duplicate": (*FULL_ROOMS, "1F-A18R"), "reordered": reordered}
+        for label, names in cases.items():
+            with self.subTest(case=label):
+                await self.page.set_content(noted_grid_html(names))
+                with self.assertRaises(core.SelectorConfigurationError):
+                    await core.verify_room_identity(self.page, core.RoomSpec(AREA, "1F-A18R", 9))
+                with self.assertRaises(core.SelectorConfigurationError):
+                    await core.locate_room_cells(self.page, "1F-A18R", 9, 30, 32)
+                await self.assert_no_clicks()
 
     async def test_invalid_rosters_reject_both_identity_and_direct_grid_selection(self):
         reordered = list(VISIBLE_ROOMS)
