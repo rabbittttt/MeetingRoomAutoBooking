@@ -36,16 +36,14 @@ rooms 填写楼栋查询后的完整名单，行号按实际网页顺序从1连�
 源码与构建输入
 会议室预定.py 是主核心源码，booking_core.py 是同步副本，会议室自动抢订_GUI.py 是界面入口。
 源码运行默认使用F5配置；区域构建输入分别生成在 build\region_sources\F5、H7 和 B2a。
-每个EXE只编入对应区域配置，不需要维护两份预约源码。
+每个EXE只编入对应区域配置，三个区域共用一份预约源码。
 
-命令行用法
-python build_exe.py --profile F5
-python build_exe.py --profile H7
-python build_exe.py --profile B2a
-python build_exe.py --profile all
-python build_exe.py --profile F5 --check
-python build_exe.py --profile H7 --check
-python build_exe.py --profile all --check
+命令行用法（在“项目源码”目录的 PowerShell 中运行，默认使用 Project/.venv）
+.\run-project.ps1 build_exe.py --profile F5
+.\run-project.ps1 build_exe.py --profile H7
+.\run-project.ps1 build_exe.py --profile B2a
+.\run-project.ps1 build_exe.py --profile all
+.\run-project.ps1 build_exe.py --profile all --check
 --check 仅核验配置、同步源码并准备构建输入，不生成EXE。
 
 数据与授权

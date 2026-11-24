@@ -4,8 +4,8 @@
 本说明所在目录即授权管理目录，相对于包含 AGENTS.md 的项目根目录为“授权管理”。
 预约源码位于同级“项目源码”目录，沿用现有签名密钥，不需要重新生成。
 Git不再跟踪管理员EXE，本机已有EXE可继续使用。新拉取的工程可用源码打开同一管理窗口：
-安装Python及cryptography依赖后，在项目根目录运行下面一整行，显式使用本目录的原有私钥和名单：
-python .\项目源码\license_admin.py --key .\授权管理\admin_private_key.pem --accounts-file .\授权管理\accounts.txt --output .\授权管理\账号授权.json
+先在 Project 根目录初始化共享环境。在 MeetingRoomAutoBooking 根目录的 PowerShell 中运行下面一整行。启动器将工作目录切换到“项目源码”，因此用 ..\授权管理 指向原有私钥、名单和输出目录。
+.\项目源码\run-project.ps1 license_admin.py --key ..\授权管理\admin_private_key.pem --accounts-file ..\授权管理\accounts.txt --output ..\授权管理\账号授权.json
 私钥和已有名单需由管理员单独放入本目录，不能从Git获取；不要生成新密钥替换原有密钥。
 
 增加或删除账号
@@ -14,7 +14,7 @@ python .\项目源码\license_admin.py --key .\授权管理\admin_private_key.pe
 3. 点击“保存名单并签发授权文件”。
 4. 工具维护本目录 accounts.txt，并生成本目录“账号授权.json”。
 5. 用新文件替换使用者EXE同目录的“账号授权.json”，重新打开预约程序。
-名单变更无需重新打包预约程序，F5和H7使用相同的授权机制。
+名单变更无需重新打包预约程序，F5、H7和B2a使用相同的授权机制。
 只编辑 accounts.txt 不会产生有效授权，必须通过工具签发；手改授权JSON会使签名无效。
 
 保管与分发
@@ -26,7 +26,7 @@ python .\项目源码\license_admin.py --key .\授权管理\admin_private_key.pe
 管理EXE中没有私钥，单独复制管理EXE不能签发。
 
 验证范围
-预约程序核验Windows用户名，不读取密码，不验证企业域、SID或浏览器登录账号。
+授权文件按 Windows 用户名核验。网页的 W3 备用凭据在使用者电脑另行设置，与授权名单独立。
 本地同名Windows账号也会匹配，账号大小写不影响匹配。
 离线授权不能远程即时撤销；删除账号后，应替换使用者持有的授权文件。
 保有旧有效授权文件的使用者仍可能继续运行。
